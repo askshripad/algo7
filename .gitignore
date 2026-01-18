@@ -1,0 +1,42 @@
+# Environment variables and secrets
+.env
+*.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Logs and database files
+algo_logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Contract master files (can be regenerated)
+angel_contract_master.json
+
+# CSV exports
+*.csv
+
+# Temporary files
+*.tmp
+*.bak
