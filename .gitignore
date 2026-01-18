@@ -14,7 +14,9 @@ env/
 ENV/
 
 # Logs and database files
+logs/
 algo_logs/
+LOG_DIR/
 *.log
 *.db
 *.sqlite
