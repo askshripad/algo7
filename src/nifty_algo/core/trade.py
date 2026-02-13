@@ -244,7 +244,7 @@ def monitor_exit_condition(broker, algo_trade: AlgoTrade, handler=None, check_in
                     pnl,
                 )
                 if algo_trade.check_exit(call_ltp, put_ltp):
-                    algo_trade.exit_trade(broker, qty=1)
+                    algo_trade.exit_trade(broker, qty=config.ORDER_QTY)
                     break
             else:
                 logger.warning(
