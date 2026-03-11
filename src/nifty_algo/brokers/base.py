@@ -1,5 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from datetime import date
 
 class BrokerInterface(ABC):
     """Abstract base class for broker implementations"""
@@ -43,3 +44,7 @@ class BrokerInterface(ABC):
     def connect_websocket(self,symbols:list[str],handler) -> tuple:
         """Connect to WebSocket for real-time data"""
         raise NotImplementedError
+
+    def get_nearest_expiry(self) -> date | None:
+        """Return nearest option expiry from broker (e.g. contract master). None if not available."""
+        return None
