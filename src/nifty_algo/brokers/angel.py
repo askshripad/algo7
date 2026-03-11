@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
 
@@ -130,6 +130,53 @@ class AngelBroker(BrokerInterface):
             logger.warning(f"Failed to load contract master file: {e}")
             logger.warning("Will fall back to searchScrip API for token lookup")
             self.contract_master = None
+
+    def get_nearest_expiry(self) -> Optional[date]:
+        """
+        Get the nearest NIFTY option expiry from the contract master.
+        Reflects exchange calendar (no hardcoded weekday; holidays etc. are
+        as per listed expiries). Returns date or None if master not loaded.
+        """
+        if not self.contract_master:
+            return None
+        month_map = {
+            "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+            "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
+        }
+        expiry_re = re.compile(
+            r"NIFTY(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})\d+(?:CE|PE)$"
+        )
+        today = date.today()
+        expiries = set()
+        try:
+            for row in self.contract_master:
+                if row.get("name") != "NIFTY" or row.get("instrumenttype") != "OPTIDX":
+                    continue
+                sym = row.get("symbol", "")
+                m = expiry_re.match(sym)
+                if not m:
+                    continue
+                dd, mon, yy = m.groups()
+                year = 2000 + int(yy) if int(yy) < 50 else 1900 + int(yy)
+                month = month_map.get(mon)
+                if not month:
+                    continue
+                try:
+                    d = date(year, month, int(dd))
+                    if d >= today:
+                        expiries.add(d)
+                except (ValueError, TypeError):
+                    continue
+            if expiries:
+                nearest = min(expiries)
+                logger.info(
+                    "Nearest expiry from contract master: %s",
+                    nearest.strftime("%d-%b-%Y"),
+                )
+                return nearest
+        except Exception as e:
+            logger.warning("Failed to get expiry from contract master: %s", e)
+        return None
 
     def _get_token_from_master(self, tradingsymbol):
         """

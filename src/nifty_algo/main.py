@@ -138,7 +138,11 @@ def _fetch_option_data(broker, strategy, nifty_spot):
     logger.info("Strikes Below ATM: %s", strike_info["strikes_below"])
     logger.info("All Strikes: %s", all_strikes)
     logger.info("STEP 3: Getting Option Expiry Date")
-    expiry_date = get_nearest_expiry()
+    expiry_date = get_nearest_expiry(broker=broker)
+    if expiry_date is None:
+        raise ValueError(
+            "Could not determine option expiry. Ensure broker provides expiry (e.g. contract master loaded for Angel)."
+        )
     logger.info("Nearest Expiry Date: %s", expiry_date.strftime("%d-%b-%Y"))
     try:
         example_symbol = get_option_symbol(expiry_date, atm_strike, "CE", broker)

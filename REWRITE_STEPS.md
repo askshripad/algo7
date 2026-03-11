@@ -512,3 +512,36 @@ Fyers WebSocket handler + connection + fallback to polling.
 CONTINUE_LOGGING_AFTER_TRADE loop.
 CSV summary / dataframe export (if you want that behavior).
 If you want, I can implement those next (they’re a bit larger but straightforward).
+
+check price move from 80 to 65.
+make sure it has not made day low 55
+buy at 65 and exit at 95
+
+nifty gave directional trade (up or down) on below days.can you analyse below days option data and see if we can come to know the trending days by 09:30 am
+down trend days:
+Down - 23-Jan-2026
+Down - 20-Jan-2026
+Down - 13-Jan-2026
+Down - 09-Jan-2026
+Down - 08-Jan-2026
+Down - 29-Dec-2026
+Down - 08-Dec-2025
+Down - 01-Dec-2025
+Down - 04-Nov-2025
+
+UP - 02-Jan-2026
+UP - 31-Dec-2025
+UP - 05-Dec-2025
+UP - 26-Nov-2025
+UP - 20-Nov-2025
+UP - 19-Nov-2025
+UP - 16-Oct-2025
+UP - 17-Oct-2025
+
+python generate_trend_signal.py 2026-01-21
+# or
+python generate_trend_signal.py 25-01-2026
+
+python generate_trending_stocks_signal.py 2026-01-23 MCX
+
+   python generate_trending_stocks_signal.py 2025-11-07
