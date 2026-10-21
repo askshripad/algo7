@@ -10,7 +10,7 @@ from nifty_algo.brokers import get_broker
 from nifty_algo.strategies import get_strategy
 from nifty_algo.core.trade import AlgoTrade, check_existing_positions, monitor_exit_condition
 from nifty_algo.data.fetch import get_nifty_spot_price
-from nifty_algo.market.hours import is_market_open, wait_for_market_open
+from nifty_algo.market.hours import is_market_open, is_within_entry_cutoff, wait_for_market_open, now_ist
 from nifty_algo.core.strikes import round_to_nearest_50
 from nifty_algo.core.strikes import get_strike_prices, get_option_symbol
 from nifty_algo.market.expiry import get_nearest_expiry
@@ -24,6 +24,8 @@ from nifty_algo.data.db import (
     save_options_data_to_db,
     save_nifty_spot_to_db,
 )
+from nifty_algo.cache.market_cache import get_cache
+from nifty_algo.core.strangle_tracker import set_algo_strikes, get_strangle_tracker
 import asyncio
 import time
 
@@ -127,10 +129,29 @@ def _get_nifty_spot_with_market_check(broker, logger) -> float | None:
     return nifty_spot
 
 
-def _fetch_option_data(broker, strategy, nifty_spot):
+def _get_strike_selection_spot(live_nifty_spot: float, logger) -> float:
+    """
+    Spot used for strike/ATM selection.
+    When enabled, force preopen spot for CE/PE strike selection.
+    """
+    if (
+        getattr(config, "USE_PREOPEN_PRICE_FOR_STRIKE_SELECTION", False)
+        and config.NIFTY_PREOPEN_PRICE
+        and config.NIFTY_PREOPEN_PRICE > 0
+    ):
+        logger.info(
+            "Strike selection using preopen spot (NIFTY_PREOPEN_PRICE=%.2f) instead of live spot %.2f",
+            config.NIFTY_PREOPEN_PRICE,
+            live_nifty_spot,
+        )
+        return float(config.NIFTY_PREOPEN_PRICE)
+    return live_nifty_spot
+
+
+def _fetch_option_data(broker, strategy, strike_selection_spot, live_nifty_spot: float):
     logger = logging.getLogger(__name__)
     logger.info("STEP 2: Calculating ATM and Strike Prices")
-    strike_info = get_strike_prices(nifty_spot, fast_mode=config.FAST_ENTRY_MODE)
+    strike_info = get_strike_prices(strike_selection_spot, fast_mode=config.FAST_ENTRY_MODE)
     atm_strike = strike_info["atm"]
     all_strikes = strike_info["all_strikes"]
     logger.info("ATM Strike: %s", atm_strike)
@@ -158,12 +179,22 @@ def _fetch_option_data(broker, strategy, nifty_spot):
     if config.FAST_ENTRY_MODE and config.USE_ASYNC_FETCHING:
         all_option_data, option_symbols, _ = asyncio.run(
             fetch_strikes_smart_async(
-                broker, expiry_date, atm_strike, nifty_spot, get_entry_strikes_fn
+                broker,
+                expiry_date,
+                atm_strike,
+                strike_selection_spot,
+                get_entry_strikes_fn,
+                spot_for_cache=live_nifty_spot,
             )
         )
     elif config.FAST_ENTRY_MODE:
         all_option_data, option_symbols, _ = fetch_strikes_smart(
-            broker, expiry_date, atm_strike, nifty_spot, get_entry_strikes_fn
+            broker,
+            expiry_date,
+            atm_strike,
+            strike_selection_spot,
+            get_entry_strikes_fn,
+            spot_for_cache=live_nifty_spot,
         )
     else:
         for strike in all_strikes:
@@ -218,7 +249,8 @@ def _snapshot_non_fast(db_conn, all_option_data, nifty_spot, atm_strike):
 def _retry_entry_search(
     broker,
     strategy,
-    nifty_spot,
+    strike_selection_spot,
+    live_nifty_spot: float,
     expiry_date,
     get_entry_strikes_fn,
 ):
@@ -230,31 +262,50 @@ def _retry_entry_search(
             logger.info("Entry search retries exhausted after %s attempts.", retry_count)
             break
 
-        interval_ms = int(config.STRIKE_SEARCH_RETRY_INTERVAL * 1000)
+        now = now_ist()
+        retry_interval = (
+            config.STRIKE_SEARCH_RETRY_INTERVAL_AFTER_9_25
+            if now.hour > 9 or (now.hour == 9 and now.minute >= 25)
+            else config.STRIKE_SEARCH_RETRY_INTERVAL
+        )
+        interval_ms = int(retry_interval * 1000)
         logger.info(
             "Retrying entry search | Attempt %s | Interval %sms",
             retry_count + 1,
             interval_ms,
         )
         try:
-            time.sleep(config.STRIKE_SEARCH_RETRY_INTERVAL)
+            time.sleep(retry_interval)
         except KeyboardInterrupt:
             break
 
-        nifty_spot = get_nifty_spot_price(broker) or nifty_spot
-        strike_info = get_strike_prices(nifty_spot, fast_mode=config.FAST_ENTRY_MODE)
+        live_quote = get_nifty_spot_price(broker)
+        if live_quote is not None and live_quote > 0:
+            live_nifty_spot = live_quote
+            strike_selection_spot = _get_strike_selection_spot(live_nifty_spot, logger)
+        strike_info = get_strike_prices(strike_selection_spot, fast_mode=config.FAST_ENTRY_MODE)
         atm_strike = strike_info["atm"]
         all_strikes = strike_info["all_strikes"]
 
         if config.FAST_ENTRY_MODE and config.USE_ASYNC_FETCHING:
             all_option_data, option_symbols, _ = asyncio.run(
                 fetch_strikes_smart_async(
-                    broker, expiry_date, atm_strike, nifty_spot, get_entry_strikes_fn
+                    broker,
+                    expiry_date,
+                    atm_strike,
+                    strike_selection_spot,
+                    get_entry_strikes_fn,
+                    spot_for_cache=live_nifty_spot,
                 )
             )
         elif config.FAST_ENTRY_MODE:
             all_option_data, option_symbols, _ = fetch_strikes_smart(
-                broker, expiry_date, atm_strike, nifty_spot, get_entry_strikes_fn
+                broker,
+                expiry_date,
+                atm_strike,
+                strike_selection_spot,
+                get_entry_strikes_fn,
+                spot_for_cache=live_nifty_spot,
             )
         else:
             all_option_data = []
@@ -295,7 +346,7 @@ def _retry_entry_search(
                     row.get("strike"),
                     row.get("LTP"),
                 )
-        entry_data = strategy.get_entry_strikes(all_option_data, nifty_spot, config)
+        entry_data = strategy.get_entry_strikes(all_option_data, strike_selection_spot, config)
         if entry_data is None:
             logger.info(
                 "No valid entry pair (premium <= %s) after attempt %s.",
@@ -324,11 +375,16 @@ def _enter_and_monitor_trade(broker, algo_trade, entry_data, db_conn, all_option
         put_symbol,
     )
     logger.info("Total premium Given: %s", total_premium)
+    
+    # Track the selected strikes for chart visualization (strangle: different CE/PE strikes)
+    set_algo_strikes(call_strike, put_strike, ce_symbol=call_symbol, pe_symbol=put_symbol)
     algo_trade.entry_price = total_premium
     algo_trade.call_strike = call_strike
     algo_trade.put_strike = put_strike
     ORDER_QTY = config.ORDER_QTY
-    algo_trade.enter_trade(broker, call_symbol, put_symbol, qty=ORDER_QTY)
+    if not algo_trade.enter_trade(broker, call_symbol, put_symbol, qty=ORDER_QTY):
+        logger.info("Order entry did not complete; skipping exit monitoring.")
+        return
 
     if db_conn and config.FAST_ENTRY_MODE and should_take_snapshot():
         timestamp_str = datetime.now().strftime("%H:%M:%S")
@@ -355,10 +411,64 @@ def _maybe_rate_limit_pause(broker) -> None:
         time.sleep(0.1)
 
 
+def _start_api_server(cache, port: int = 8000):
+    """Start the API server in a background thread (same process, shared memory)"""
+    import asyncio
+    import threading
+    import uvicorn
+    from nifty_algo.api.server import app
+    
+    # Store cache reference in FastAPI's app.state (shared across all requests)
+    app.state.cache = cache
+    logging.getLogger(__name__).info("Cache attached to app.state (id=%s)", id(cache))
+    
+    def run_server():
+        # Use Config + Server directly to ensure in-process execution
+        config = uvicorn.Config(
+            app=app,
+            host="0.0.0.0",
+            port=port,
+            log_level="warning",
+            loop="asyncio",
+        )
+        server = uvicorn.Server(config)
+        
+        # Create new event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(server.serve())
+    
+    thread = threading.Thread(target=run_server, daemon=True)
+    thread.start()
+    
+    # Give server time to start
+    import time
+    time.sleep(0.5)
+    
+    logging.getLogger(__name__).info("API server started on http://0.0.0.0:%s", port)
+    return thread
+
+
 def main():
     logger = setup_logging(config.LOG_DIR, config.DRY_RUN)
     logger.info("Python executable: %s", sys.executable)
     db_conn = setup_database(config)
+    cache = get_cache()
+    
+    broker = None  # Initialize for finally block access
+    api_thread = None
+    
+    if db_conn and config.USE_DATABASE:
+        from pathlib import Path
+        db_path = str(Path(config.LOG_DIR) / config.DATABASE_NAME)
+        cache.start_db_writer(db_path, interval=config.DATA_SNAPSHOT_INTERVAL)
+
+    # Start API server if enabled
+    if getattr(config, 'ENABLE_API_SERVER', False):
+        try:
+            api_thread = _start_api_server(cache, getattr(config, 'API_SERVER_PORT', 8000))
+        except Exception as e:
+            logger.warning("Failed to start API server: %s", e)
 
     try:
         run_mode = _parse_run_mode(sys.argv[1:])
@@ -379,74 +489,143 @@ def main():
 
         algo_trade = AlgoTrade()
 
-        logger.info("STEP 0: Checking for Existing Positions")
-        if _handle_existing_positions(broker, algo_trade, logger):
-            return
+        # Keep running until market closes or user interrupt (monitoring + data download)
+        ran_this_session = False
+        entry_cutoff_notice_logged = False
+        while True:
+            if not is_market_open():
+                if ran_this_session:
+                    logger.info("Market closed. Exiting run loop.")
+                    break
+                wait_for_market_open()
 
-        logger.info("STEP 1: Downloading Nifty Spot Price")
-        nifty_spot = _get_nifty_spot_with_market_check(broker, logger)
-        if nifty_spot is None:
-            return
+            logger.info("STEP 0: Checking for Existing Positions")
+            if _handle_existing_positions(broker, algo_trade, logger):
+                logger.info("Algo positions closed. Continuing to monitor and download data...")
+                ran_this_session = True
+                time.sleep(max(1, config.DATA_SNAPSHOT_INTERVAL or 60))
+                continue
 
-        (
-            all_option_data,
-            option_symbols,
-            atm_strike,
-            all_strikes,
-            expiry_date,
-        ) = _fetch_option_data(broker, strategy, nifty_spot)
+            logger.info("STEP 1: Downloading Nifty Spot Price")
+            nifty_spot = _get_nifty_spot_with_market_check(broker, logger)
+            if nifty_spot is None:
+                time.sleep(max(1, config.DATA_SNAPSHOT_INTERVAL or 60))
+                continue
 
-        if not config.FAST_ENTRY_MODE:
-            _snapshot_non_fast(db_conn, all_option_data, nifty_spot, atm_strike)
+            # Quick chart publish at session open so UI updates before full strike fetch
+            try:
+                from nifty_algo.data.fetch import publish_chart_data
+                from nifty_algo.core.strikes import round_to_nearest_50
 
-        ctx = {
-            "all_option_data": all_option_data,
-            "nifty_spot": nifty_spot,
-            "atm_strike": atm_strike,
-            "config": config,
-        }
-
-        logger.info("STEP 5: Real-time Data Monitoring")
-        logger.info("STEP 6: ALGO TRADING LOGIC")
-        condition_met = strategy.should_enter(ctx)
-        logger.info("Entry condition met: %s", condition_met)
-        if algo_trade.trade_completed:
-            condition_met = False
-
-        entry_data = None
-        if condition_met:
-            entry_data = strategy.get_entry_strikes(all_option_data, nifty_spot, config)
-            logger.info("Entry strikes raw: %s", entry_data)
-            if entry_data is None:
-                get_entry_strikes_fn = lambda d, s: strategy.get_entry_strikes(d, s, config)
-                entry_data = _retry_entry_search(
-                    broker,
-                    strategy,
-                    nifty_spot,
-                    expiry_date,
-                    get_entry_strikes_fn,
+                publish_chart_data(
+                    broker, nifty_spot, round_to_nearest_50(nifty_spot), include_volume_band=False
                 )
-                logger.info("Entry strikes after retry: %s", entry_data)
-        else:
-            logger.info("Entry condition not met. Trade entry skipped.")
+            except Exception as e:
+                logger.debug("Quick chart publish: %s", e)
 
-        _enter_and_monitor_trade(
-            broker,
-            algo_trade,
-            entry_data,
-            db_conn,
-            all_option_data,
-            nifty_spot,
-            atm_strike,
-        )
+            strike_selection_spot = _get_strike_selection_spot(nifty_spot, logger)
+
+            (
+                all_option_data,
+                option_symbols,
+                atm_strike,
+                all_strikes,
+                expiry_date,
+            ) = _fetch_option_data(broker, strategy, strike_selection_spot, nifty_spot)
+
+            if not config.FAST_ENTRY_MODE:
+                _snapshot_non_fast(db_conn, all_option_data, nifty_spot, atm_strike)
+
+            ctx = {
+                "all_option_data": all_option_data,
+                "nifty_spot": nifty_spot,
+                "strike_selection_spot": strike_selection_spot,
+                "atm_strike": atm_strike,
+                "config": config,
+            }
+
+            logger.info("STEP 5: Real-time Data Monitoring")
+            logger.info("STEP 6: ALGO TRADING LOGIC")
+            condition_met = strategy.should_enter(ctx)
+            logger.info("Entry condition met: %s", condition_met)
+            skip_because_completed = False
+            if algo_trade.trade_completed:
+                skip_because_completed = True
+                condition_met = False
+
+            allow_new_entry = True
+            if config.ENTRY_CUTOFF_ENABLED and not is_within_entry_cutoff(
+                config.ENTRY_CUTOFF_HOUR,
+                config.ENTRY_CUTOFF_MINUTE,
+            ):
+                allow_new_entry = False
+                if not entry_cutoff_notice_logged:
+                    logger.info(
+                        "Entry window closed for today (IST after %02d:%02d) — "
+                        "continuing data fetch until market close; no new entries.",
+                        config.ENTRY_CUTOFF_HOUR,
+                        config.ENTRY_CUTOFF_MINUTE,
+                    )
+                    entry_cutoff_notice_logged = True
+
+            entry_data = None
+            if condition_met and allow_new_entry:
+                entry_data = strategy.get_entry_strikes(all_option_data, strike_selection_spot, config)
+                logger.info("Entry strikes raw: %s", entry_data)
+                if entry_data is None:
+                    get_entry_strikes_fn = lambda d, s: strategy.get_entry_strikes(d, s, config)
+                    entry_data = _retry_entry_search(
+                        broker,
+                        strategy,
+                        strike_selection_spot,
+                        nifty_spot,
+                        expiry_date,
+                        get_entry_strikes_fn,
+                    )
+                    logger.info("Entry strikes after retry: %s", entry_data)
+            elif condition_met and not allow_new_entry:
+                logger.info(
+                    "Entry signal present but cutoff passed — no new trade (fetching data only)."
+                )
+            else:
+                if skip_because_completed:
+                    logger.info("Trade already completed this session. Skipping new entry.")
+                else:
+                    logger.info("Entry condition not met. Trade entry skipped.")
+
+            _enter_and_monitor_trade(
+                broker,
+                algo_trade,
+                entry_data,
+                db_conn,
+                all_option_data,
+                nifty_spot,
+                atm_strike,
+            )
+
+            # Positions closed or no entry: keep monitoring and downloading data
+            logger.info("Algo positions closed or no entry. Continuing to monitor and download data...")
+            ran_this_session = True
+            time.sleep(max(1, config.DATA_SNAPSHOT_INTERVAL or 60))
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user.")
     except Exception as e:
         logger.exception("Unhandled error in main: %s", e)
     finally:
+        # Cleanup: logout broker session (ignore all errors)
+        if broker and hasattr(broker, 'logout'):
+            try:
+                broker.logout()
+            except BaseException:
+                pass  # Ignore all errors during cleanup
+        
+        cache.stop_db_writer()
         if db_conn:
             date_str = datetime.now().strftime("%Y-%m-%d")
             log_end_of_day_summary(db_conn, date_str)
             db_conn.close()
 
+
+if __name__ == "__main__":
+    main()

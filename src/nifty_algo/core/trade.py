@@ -5,8 +5,23 @@ from dataclasses import dataclass
 import logging
 
 from nifty_algo.config import config
+from nifty_algo.data.fetch import get_option_ohlcv_realtime
 
 logger = logging.getLogger(__name__)
+
+
+def _place_order_response_ok(resp) -> bool:
+    """True if broker accepted the order; False if missing or explicit failure."""
+    if resp is None:
+        return False
+    if not isinstance(resp, dict):
+        return True
+    if "code" in resp:
+        return resp.get("code") == 200
+    if resp.get("status") is False:
+        return False
+    return True
+
 
 def _strike_from_symbol(sym: str | None) -> int | None:
     if not sym:
@@ -25,10 +40,6 @@ def _extract_ltp(data: dict | None) -> float | None:
             except (TypeError, ValueError):
                 continue
     return None
-
-def get_option_ohlcv_realtime(broker, symbol: str) -> dict | None:
-    # Uses broker quote method as a generic OHLCV source
-    return broker.get_option_quote(symbol)
 
 @dataclass
 class AlgoTrade:
@@ -106,6 +117,17 @@ class AlgoTrade:
         self.call_order_id = str(call_resp) if call_resp is not None else None
         self.put_order_id = str(put_resp) if put_resp is not None else None
 
+        if not _place_order_response_ok(call_resp) or not _place_order_response_ok(put_resp):
+            logger.error(
+                "Entry orders failed | call_resp=%s | put_resp=%s — not opening position in algo",
+                call_resp,
+                put_resp,
+            )
+            self.call_order_id = None
+            self.put_order_id = None
+            self.is_position_open = False
+            return False
+
         # Use post-order LTP as entry reference (fill price may not be available)
         # call_ltp = _extract_ltp(get_option_ohlcv_realtime(broker, call_symbol))
         # put_ltp = _extract_ltp(get_option_ohlcv_realtime(broker, put_symbol))
@@ -142,9 +164,11 @@ class AlgoTrade:
             self.trade_completed = True
             return True
 
-        # Buy back both legs
-        broker.place_order(self.call_symbol, "SELL", qty)
-        broker.place_order(self.put_symbol, "SELL", qty)
+        c = broker.place_order(self.call_symbol, "SELL", qty)
+        p = broker.place_order(self.put_symbol, "SELL", qty)
+        if not _place_order_response_ok(c) or not _place_order_response_ok(p):
+            logger.error("Exit orders failed | call=%s | put=%s", c, p)
+            return False
 
         self.is_position_open = False
         self.trade_completed = True
@@ -200,6 +224,7 @@ def check_existing_positions(broker):
 
 def monitor_exit_condition(broker, algo_trade: AlgoTrade, handler=None, check_interval: int | None = None):
     interval = check_interval if check_interval is not None else config.API_POLLING_INTERVAL
+    last_chart_publish = 0.0
 
     try:
         logger.info(
@@ -221,8 +246,13 @@ def monitor_exit_condition(broker, algo_trade: AlgoTrade, handler=None, check_in
                     call_data = handler.get_latest(algo_trade.call_symbol)
                     put_data = handler.get_latest(algo_trade.put_symbol)
             else:
-                call_data = get_option_ohlcv_realtime(broker, algo_trade.call_symbol)
-                put_data = get_option_ohlcv_realtime(broker, algo_trade.put_symbol)
+                # Do not publish to cache here — exit monitor polls often; cache/UI follow UI_UPDATE_INTERVAL from main fetch.
+                call_data = get_option_ohlcv_realtime(
+                    broker, algo_trade.call_symbol, publish_to_cache=False
+                )
+                put_data = get_option_ohlcv_realtime(
+                    broker, algo_trade.put_symbol, publish_to_cache=False
+                )
 
             call_ltp = _extract_ltp(call_data)
             put_ltp = _extract_ltp(put_data)
@@ -254,6 +284,20 @@ def monitor_exit_condition(broker, algo_trade: AlgoTrade, handler=None, check_in
                 )
 
             time.sleep(interval)
+
+            # Keep chart / niftychart updating while exit monitor holds the main loop
+            try:
+                from nifty_algo.data.fetch import get_nifty_spot_price, publish_chart_data
+
+                ui_iv = max(1, int(getattr(config, "UI_UPDATE_INTERVAL", 60)))
+                now_ts = time.time()
+                if now_ts - last_chart_publish >= ui_iv:
+                    spot = get_nifty_spot_price(broker)
+                    if spot and spot > 0:
+                        publish_chart_data(broker, spot, include_volume_band=True)
+                    last_chart_publish = now_ts
+            except Exception as chart_exc:
+                logger.debug("Chart publish during exit monitor: %s", chart_exc)
     except KeyboardInterrupt:
         logger.info("Exit monitor interrupted by user.")
         return

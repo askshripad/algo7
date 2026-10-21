@@ -1,0 +1,7 @@
+                                              name  n  pnl_inr  win_rate
+                              Long -- all sessions 19  -5972.5  0.315789
+ Long -- range/ATR >= 1.0 (expansion vs prior ATR)  7   2772.5  0.428571
+Long -- expansion + vol >= median |CE-PE| vol diff  5   3170.0  0.600000
+             Short (sell strangle) -- all sessions 19   5972.5  0.684211
+          Short -- range/ATR <= 0.92 (compression)  9   5287.5  0.666667
+   Short -- compression + vol >= median |vol diff|  4   -762.5  0.250000

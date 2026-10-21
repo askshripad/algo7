@@ -22,6 +22,31 @@ def _now_ist() -> dt.datetime:
     # fallback to naive datetime
     return dt.datetime.now()
 
+
+def now_ist() -> dt.datetime:
+    """Public alias: current time in Asia/Kolkata when pytz is installed, else naive local."""
+    return _now_ist()
+
+
+def is_within_entry_cutoff(
+    cutoff_hour: int,
+    cutoff_minute: int,
+    now: dt.datetime | None = None,
+) -> bool:
+    """
+    True if current IST time is on or before the end of the cutoff minute (inclusive).
+
+    Used to allow new strategy entries only until e.g. 9:20 IST; after that, keep
+    fetching data but do not open new positions. Does not apply to exit monitoring
+    of a position already opened earlier in the session.
+    """
+    now = now or _now_ist()
+    if now.weekday() > 4:
+        return False
+    end = now.replace(hour=cutoff_hour, minute=cutoff_minute, second=59, microsecond=999999)
+    return now <= end
+
+
 def is_market_open(now:dt.datetime|None=None) -> bool:
     """Check if NSE market is currently open (9:15 AM - 3:30 PM IST)"""
     if now is None:
@@ -89,7 +114,7 @@ def wait_for_market_open(check_interval: int = 10) -> None:
                 logger.info("Waiting %.1f minutes until market opens...", minutes)
                 logger.info("(Press Ctrl+C to exit)")
                 time.sleep(min(check_interval, sleep_seconds))
-                continue
+                continue # uncomment shripad
 
         # Weekend: wait until next trading day
         next_day = _next_trading_day(now)

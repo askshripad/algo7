@@ -5,3 +5,9 @@ logzero>=1.7.0
 pandas>=1.5.0
 python-dotenv>=0.19.0
 pytz>=2023.3
+
+# FastAPI server
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+websockets>=11.0
+breeze-connect>=1.0.0

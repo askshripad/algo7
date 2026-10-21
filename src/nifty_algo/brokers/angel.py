@@ -87,6 +87,13 @@ class AngelBroker(BrokerInterface):
                 self._load_contract_master()
             else:
                 logger.info("Contract master loading disabled.")
+            
+            # Startup delay to avoid rate limits on restart
+            startup_delay = getattr(config, 'ANGEL_STARTUP_DELAY', 0)
+            if startup_delay > 0:
+                logger.info("Startup delay: waiting %ss before API calls...", startup_delay)
+                time.sleep(startup_delay)
+            
             return True
 
         error_msg = data.get("message", "Unknown error")
@@ -539,3 +546,22 @@ class AngelBroker(BrokerInterface):
         """Connect to Angel WebSocket"""
         logger.warning("Angel WebSocket not implemented. Using polling.")
         return None, None
+
+    def logout(self):
+        """Logout and terminate the session (best effort, non-blocking)"""
+        try:
+            if self.smart_api and self.client_code:
+                # Set a short timeout for cleanup
+                original_timeout = getattr(self.smart_api, 'timeout', None)
+                self.smart_api.timeout = 3  # 3 second timeout for logout
+                try:
+                    result = self.smart_api.terminateSession(self.client_code)
+                    logger.info("Angel session terminated: %s", result)
+                    return result
+                finally:
+                    if original_timeout:
+                        self.smart_api.timeout = original_timeout
+        except BaseException as e:
+            # Silently ignore all errors during logout (cleanup)
+            logger.debug("Session cleanup: %s", e)
+        return None

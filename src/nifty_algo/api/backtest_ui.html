@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Nifty Strangle Analyzer</title>
+        <style>
+            html { color-scheme: dark; height: 100%; }
+            :root {
+              --bg:#0b1220; --card:#0f1a33; --text:#e7eefc; --muted:#95a3c7; --grid:#253055; --accent:#4ecca3;
+              /* Reserve space for form + stats + margins (tweak if UI grows) */
+              --charts-vpad: 250px;
+            }
+            body {
+              margin: 0; padding: 14px 12px;
+              font-family: Arial, sans-serif;
+              background: var(--bg); color: var(--text);
+              min-height: 100vh;
+              min-height: 100dvh;
+              display: flex;
+              flex-direction: column;
+            }
+            *, *::before, *::after { box-sizing: border-box; }
+            .wrap {
+              width: 100%; max-width: 100%; margin: 0 auto;
+              flex: 1;
+              display: flex;
+              flex-direction: column;
+              min-height: 0;
+            }
+            .top {
+              display: flex;
+              flex-direction: column;
+              flex: 1;
+              gap: 14px;
+              align-items: stretch;
+              width: 100%;
+              min-height: 0;
+            }
+            .card {
+              background: var(--card);
+              border: 1px solid #172448;
+              border-radius: 10px;
+              padding: 14px;
+              width: 100%;
+              flex: 1;
+              display: flex;
+              flex-direction: column;
+              min-height: 0;
+            }
+            .card h2 { margin: 0 0 10px 0; font-size: 16px; color: var(--text); }
+            .card > form,
+            .card > .results-grid,
+            .card > #error,
+            .card > #data_sources_line {
+              flex-shrink: 0;
+            }
+            .form-grid{
+                    display:flex;
+                    flex-direction:column;
+                    gap:6px;
+                    margin-top: 4px;
+                    width: 100%;
+                    }
+            /* Single horizontal row of controls (scroll on narrow screens) */
+            .form-row{
+                    display:flex;
+                    flex-wrap: nowrap;
+                    align-items:center;
+                    justify-content: flex-start;
+                    gap: 8px 10px;
+                    width: 100%;
+                    overflow-x: auto;
+                    overflow-y: hidden;
+                    padding-bottom: 4px;
+                    -webkit-overflow-scrolling: touch;
+                    }
+            .form-hint{
+                    font-size: 11px;
+                    color: var(--muted);
+                    line-height: 1.35;
+                    margin: 0;
+                    padding-left: 2px;
+                    }
+            .ui-hidden { display: none !important; }
+
+                    .field{
+                    display:flex;
+                    align-items:center;
+                    gap:6px;
+                    min-width:0;
+                    flex-shrink: 0;
+                    }
+
+                    .field label{
+                    display:block;
+                    font-size: 12px;
+                    color: var(--muted);
+                    margin: 0;
+                    white-space: nowrap;
+                    }
+
+                    .field input{
+                    width: 96px;
+                    padding: 5px 6px;
+                    border-radius: 8px;
+                    border: 1px solid #223260;
+                    background: #0b142c;
+                    color: var(--text);
+                    }
+
+                    .field.date input{
+                    width: 128px;
+                    min-width: 118px;
+                    color-scheme: dark;
+                    accent-color: #e7eefc;
+                    }
+
+                    /*
+                     * White calendar icon: WebKit/Blink use ::-webkit-calendar-picker-indicator.
+                     * Data-URI SVG is reliable when filter/invert is ignored by the browser/theme.
+                     */
+                    .field.date input[type="date"]::-webkit-calendar-picker-indicator {
+                    cursor: pointer;
+                    width: 18px;
+                    height: 18px;
+                    padding: 0;
+                    margin: 0 0 0 2px;
+                    opacity: 1 !important;
+                    /* Explicit white calendar (native icon is often dark / invisible on our bg) */
+                    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23ffffff'%3E%3Cpath d='M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V10h16v11zm0-13H4V5h16v3z'/%3E%3C/svg%3E")
+                      center / contain no-repeat;
+                    }
+
+                    .field.narrow input{
+                    width: 80px; /* comfortable for 8 digits + padding */
+                    min-width: 75px;
+                    }
+
+                    .actions{
+                    display:flex;
+                    gap:10px;
+                    align-items:center;
+                    flex-shrink: 0;
+                    margin-left: 0;
+                    padding-left: 0;
+                    }
+
+                    button.button{
+                    appearance: none;
+                    -webkit-font-smoothing: antialiased;
+                    -moz-osx-font-smoothing: grayscale;
+                    font: inherit;
+                    font-weight: 600;
+                    font-size: 13px;
+                    letter-spacing: 0.02em;
+                    line-height: 1.2;
+                    padding: 9px 20px;
+                    border-radius: 8px;
+                    border: 1px solid #2a8f72;
+                    background: linear-gradient(180deg, #1b6e58 0%, #134a3d 100%);
+                    color: #f4fffb;
+                    cursor: pointer;
+                    box-shadow:
+                      0 1px 0 rgba(255,255,255,0.12) inset,
+                      0 2px 8px rgba(0,0,0,0.35);
+                    transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.08s ease;
+                    }
+
+                    button.button.primary:hover:not(:disabled) {
+                    background: linear-gradient(180deg, #23856a 0%, #185a4a 100%);
+                    border-color: #3cc49a;
+                    box-shadow:
+                      0 1px 0 rgba(255,255,255,0.15) inset,
+                      0 3px 10px rgba(0,0,0,0.4);
+                    }
+
+                    button.button.primary:active:not(:disabled) {
+                    transform: translateY(1px);
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.4) inset;
+                    }
+
+                    button.button:focus-visible {
+                    outline: 2px solid #4ecca3;
+                    outline-offset: 2px;
+                    }
+
+                    button.button:disabled {
+                    opacity: 0.55;
+                    cursor: not-allowed;
+                    transform: none;
+                    }
+
+                    button.button.secondary {
+                    border-color: #4a5f8a;
+                    background: linear-gradient(180deg, #2a3a58 0%, #1a2438 100%);
+                    color: #e7eefc;
+                    }
+                    button.button.secondary:hover:not(:disabled) {
+                    border-color: #6a8fcf;
+                    background: linear-gradient(180deg, #354a6e 0%, #243352 100%);
+                    }
+
+                    /*
+                     * Status UX: one pill next to Submit (no separate "Status" label — the message + color say enough).
+                     * role="status" + aria-live for screen readers; icon via CSS for quick scanning.
+                     */
+                    .status-wrap {
+                    display: none;
+                    align-items: center;
+                    flex-shrink: 0;
+                    }
+
+                    .status-wrap:not(.state-idle) {
+                    display: inline-flex;
+                    }
+
+                    .status {
+                    font-size: 12px;
+                    font-weight: 600;
+                    color: #c8d6f0;
+                    padding: 6px 4px 6px 0;
+                    border-radius: 8px;
+                    background: transparent;
+                    border: none;
+                    box-shadow: none;
+                    white-space: nowrap;
+                    min-height: 28px;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    }
+
+                    @keyframes status-spin {
+                    to { transform: rotate(360deg); }
+                    }
+
+                    /* Running: spinner + blue text (no border) */
+                    .status-wrap.state-running .status::before {
+                    content: "";
+                    flex-shrink: 0;
+                    width: 12px;
+                    height: 12px;
+                    border: 2px solid rgba(79, 163, 255, 0.25);
+                    border-top-color: #4fa3ff;
+                    border-radius: 50%;
+                    animation: status-spin 0.65s linear infinite;
+                    }
+                    .status-wrap.state-running .status {
+                    color: #9fd4ff;
+                    }
+
+                    /* Done: lime green text + check (no border) */
+                    .status-wrap.state-done .status::before {
+                    content: "✓";
+                    flex-shrink: 0;
+                    font-size: 13px;
+                    font-weight: 800;
+                    color: #32cd32;
+                    line-height: 1;
+                    }
+                    .status-wrap.state-done .status {
+                    color: #32cd32;
+                    }
+
+                    /* Error: red text + mark (no border) */
+                    .status-wrap.state-error .status::before {
+                    content: "!";
+                    flex-shrink: 0;
+                    font-size: 12px;
+                    font-weight: 800;
+                    color: #ff4444;
+                    line-height: 1;
+                    }
+                    .status-wrap.state-error .status {
+                    color: #ff4444;
+                    }
+                    .results-grid {
+                    display:grid; gap:10px;
+                    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+                    margin-top: 12px;
+                    }
+                    .stat {
+                    background: #0a142e;
+                    border: 1px solid #172448;
+                    border-radius: 10px;
+                    padding: 10px;
+                    }
+                    .stat .k { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+                    .stat .v { font-size: 18px; font-weight: 700; color: var(--accent); }
+                    .charts {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                    margin-top: 14px;
+                    flex: 1 1 auto;
+                    min-height: 0;
+                    align-content: stretch;
+                    }
+                    .chart-card {
+                    display: flex;
+                    flex-direction: column;
+                    min-height: 0;
+                    flex: 1;
+                    position: relative;
+                    }
+                    .chart-card h2 {
+                    position: absolute;
+                    top: 8px;
+                    left: 10px;
+                    margin: 0;
+                    font-size: 11px;
+                    font-weight: 600;
+                    line-height: 1.2;
+                    color: #cfe0ff;
+                    background: rgba(10, 20, 46, 0.78);
+                    border: 1px solid #223260;
+                    border-radius: 6px;
+                    padding: 2px 8px;
+                    z-index: 2;
+                    pointer-events: none;
+                    }
+                    /* Stacked full-width charts: split remaining viewport height */
+                    .chart-card canvas {
+                    width: 100% !important;
+                    height: max(220px, calc((100vh - var(--charts-vpad)) / 2)) !important;
+                    min-height: 220px !important;
+                    flex: 1 1 auto;
+                    }
+                    @media (max-width: 899px) {
+                    .chart-card canvas {
+                    height: max(260px, calc(45vh - 70px)) !important;
+                    }
+                    }
+                    .error { color: #ffb3b3; }
+                    .data-sources-line {
+                    font-size: 12px;
+                    color: var(--muted);
+                    margin-top: 10px;
+                    padding: 8px 12px;
+                    border-radius: 8px;
+                    border: 1px solid #223260;
+                    background: #0a142e;
+                    }
+
+                    @media (max-width: 640px) {
+                      .actions{ margin-left: 0; }
+                    }
+          </style>
+          <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+          <script src="/static/js/strangle-chart-core.js"></script>
+        
+    </head>
+    <body>
+        <div class="wrap">
+            <div class="top">
+                <div class="card">
+                    <form id="form">
+                        <div class="form-grid">
+                        <div class="form-row">
+                          <div class="field date">
+                            <label>Trade Date</label>
+                            <input type="date" id="trade_date" required />
+                          </div>
+                      
+                          <div class="field date">
+                            <label>Expiry</label>
+                            <input type="date" id="expiry_date" required />
+                          </div>
+                      
+                          <div class="field narrow">
+                            <label>Nifty open</label>
+                            <input type="number" id="nifty_open" step="1" required placeholder="spot" maxlength="8" title="Today’s cash open (ATM from this); optional auto-fill from DB" />
+                          </div>
+                      
+                          <div class="field narrow">
+                            <label>ATR</label>
+                            <input type="number" id="atr" step="1" placeholder="auto" maxlength="8" />
+                          </div>
+                          <div class="field narrow">
+                            <label>CE Strike</label>
+                            <input type="number" id="ce_strike" step="1" placeholder="opt" maxlength="8" />
+                          </div>
+                          <div class="field narrow">
+                            <label>PE Strike</label>
+                            <input type="number" id="pe_strike" step="1" placeholder="opt" maxlength="8" />
+                          </div>
+                          <div
+                            class="status-wrap state-idle"
+                            id="statusWrap"
+                            role="status"
+                            aria-live="polite"
+                            aria-atomic="true"
+                            aria-busy="false"
+                            title="Request progress (not a button)"
+                          >
+                            <span class="status" id="status"></span>
+                          </div>
+                          <div class="actions">
+                            <button class="button primary" type="submit" id="btn">Submit</button>
+                            <button class="button secondary" type="button" id="btnCancel" style="display:none;" title="Stop the in-flight request (or press Esc)">Cancel</button>
+                          </div>
+                        </div>
+                            <p class="form-hint ui-hidden">Pick <strong>Trade Date</strong> — <strong>Nifty Open</strong> (= prior <strong>Close</strong>) and <strong>ATR</strong> load from <code>nifty_daily</code> for the <strong>previous calendar day</strong> before trade date. After Submit, <strong>Nifty range</strong> (High − Low) comes from <code>nifty_daily</code> for the <strong>selected trade date</strong>. Expiry defaults to Tuesday (same day if trade date is Tuesday, otherwise the next Tuesday). Or set <strong>CE + PE</strong> manually (clear ATR).</p>
+                            <p id="nifty_daily_hint" class="form-hint ui-hidden" style="min-height:1.3em;" aria-live="polite"></p>
+                        </div>
+                      </form>
+
+                    <div class="results-grid" id="stats" style="display:none;">
+                        <div class="stat"><div class="k">CE Strike</div><div class="v" id="stat_ce_strike">-</div></div>
+                        <div class="stat"><div class="k">PE Strike</div><div class="v" id="stat_pe_strike">-</div></div>
+                        <div class="stat"><div class="k">Premium Start</div><div class="v" id="prem_start">-</div></div>
+                        <div class="stat"><div class="k">Premium End</div><div class="v" id="prem_end">-</div></div>
+                        <div class="stat"><div class="k">Nifty range</div><div class="v" id="nifty_range_stat" title="nifty_daily High − Low for the selected trade date (not the same row as Close/ATR, which use the previous day)">-</div></div>
+                    </div>
+                    <div id="error" class="error" style="margin-top:10px; display:none;"></div>
+                    <div id="data_sources_line" class="data-sources-line ui-hidden" style="display:none;" aria-live="polite"></div>
+
+                    <div class="charts">
+                        <div class="card chart-card">
+                          <h2>Total Premium + Nifty Close</h2>
+                          <canvas id="premiumChart"></canvas>
+                        </div>
+                        <div class="card chart-card">
+                          <h2 id="chart2_volume_title">Volume Diff (CE − PE)</h2>
+                          <canvas id="volumeDiffChart"></canvas>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+        <script>
+            const apiUrl = "/backtest/historical/nifty-and-strangle";
+            const niftyDailyPrevUrl = "/backtest/nifty-daily-prev";
+            /** AbortController for the active POST /backtest/historical/nifty-and-strangle (null when idle). */
+            let fetchAbortController = null;
+
+            function setSubmitLoading(loading) {
+                const btn = document.getElementById("btn");
+                const cancelBtn = document.getElementById("btnCancel");
+                if (btn) btn.disabled = !!loading;
+                if (cancelBtn) cancelBtn.style.display = loading ? "inline-block" : "none";
+            }
+            function formatYYYYMMDD(d) {
+            const yyyy = d.getFullYear();
+            const mm = String(d.getMonth() + 1).padStart(2, "0");
+            const dd = String(d.getDate()).padStart(2, "0");
+            return `${yyyy}-${mm}-${dd}`;
+            }
+
+            /** From .env NIFTY_EXPIRY_DATE via GET /config/expiry (null until loaded). */
+            let preferredExpiryFromEnv = null;
+
+            /** Weekly expiry Tuesday: if trade date is Tuesday, expiry is that day; else next Tuesday on/after trade date. */
+            function nextTuesday(fromDate) {
+            const t = new Date(fromDate);
+            const day = t.getDay(); // Sun=0 ... Tue=2 ... Sat=6
+            let diff = (2 - day + 7) % 7; // days until Tuesday (0 = already Tuesday)
+            if (diff === 0) {
+                return t;
+            }
+            t.setDate(t.getDate() + diff);
+            return t;
+            }
+
+            function autoSetExpiryFromTradeDate() {
+            const tdVal = document.getElementById("trade_date").value;
+            if (!tdVal) return;
+
+            // Prefer NIFTY_EXPIRY_DATE when it is on/after the trade date (holiday weeks, monthly, etc.)
+            if (preferredExpiryFromEnv && preferredExpiryFromEnv >= tdVal) {
+                document.getElementById("expiry_date").value = preferredExpiryFromEnv;
+                return;
+            }
+
+            // Avoid timezone shifting: force local midnight
+            const td = new Date(tdVal + "T00:00:00");
+            const nxt = nextTuesday(td);
+            document.getElementById("expiry_date").value = formatYYYYMMDD(nxt);
+            }
+
+            async function loadPreferredExpiryFromConfig() {
+                try {
+                    const r = await fetch("/config/expiry");
+                    if (!r.ok) return;
+                    const j = await r.json();
+                    preferredExpiryFromEnv =
+                        j.nifty_expiry_date_env || j.resolved_expiry || null;
+                } catch (_) { /* ignore */ }
+            }
+
+            async function fetchNiftyDailyPrevOpenAtr() {
+                const td = document.getElementById("trade_date").value;
+                const hint = document.getElementById("nifty_daily_hint");
+                if (!td) {
+                    if (hint) hint.textContent = "";
+                    return;
+                }
+                if (hint) hint.textContent = "Loading spot open & prior ATR…";
+                try {
+                    const spotUrl = "/backtest/nifty-spot-open?trade_date=" + encodeURIComponent(td);
+                    const [rPrev, rSpot] = await Promise.all([
+                        fetch(niftyDailyPrevUrl + "?trade_date=" + encodeURIComponent(td)),
+                        fetch(spotUrl),
+                    ]);
+                    let jPrev = null;
+                    let sj = null;
+                    let atrOk = false;
+                    let spotOk = false;
+                    if (rPrev.ok) {
+                        jPrev = await rPrev.json();
+                        if (jPrev.status === "ok" && jPrev.atr != null) {
+                            document.getElementById("atr").value = String(Math.round(Number(jPrev.atr)));
+                            atrOk = true;
+                        }
+                    }
+                    if (rSpot.ok) {
+                        sj = await rSpot.json();
+                        if (sj.status === "ok" && sj.open != null) {
+                            document.getElementById("nifty_open").value = String(Math.round(Number(sj.open)));
+                            spotOk = true;
+                        }
+                    }
+                    document.getElementById("ce_strike").value = "";
+                    document.getElementById("pe_strike").value = "";
+                    if (hint) {
+                        if (spotOk || atrOk) {
+                            const parts = [];
+                            if (spotOk) {
+                                parts.push("Nifty open from " + (sj && sj.source ? sj.source : "db"));
+                            }
+                            if (atrOk) {
+                                parts.push("ATR from row before trade date");
+                            }
+                            hint.textContent = parts.join(" · ") + ".";
+                        } else {
+                            hint.textContent =
+                                (sj && sj.message) ||
+                                (jPrev && jPrev.message) ||
+                                "Enter Nifty open and ATR manually (or add Open column / index data).";
+                        }
+                    }
+                    saveFormToSession();
+                } catch (e) {
+                    if (hint) hint.textContent = "Could not load prefills. Enter Nifty open & ATR manually.";
+                }
+            }
+
+            document.getElementById("trade_date").addEventListener("change", async () => {
+                autoSetExpiryFromTradeDate();
+                await fetchNiftyDailyPrevOpenAtr();
+            });
+
+            const BT_FORM_KEY = "backtest_ui_form_v3";
+            function saveFormToSession() {
+                try {
+                    sessionStorage.setItem(BT_FORM_KEY, JSON.stringify({
+                        trade_date: document.getElementById("trade_date").value,
+                        expiry_date: document.getElementById("expiry_date").value,
+                        nifty_open: document.getElementById("nifty_open").value,
+                        atr: document.getElementById("atr").value,
+                        ce_strike: document.getElementById("ce_strike").value,
+                        pe_strike: document.getElementById("pe_strike").value
+                    }));
+                } catch (_) { /* ignore */ }
+            }
+            function loadFormFromSession() {
+                try {
+                    const raw = sessionStorage.getItem(BT_FORM_KEY);
+                    if (!raw) return;
+                    const o = JSON.parse(raw);
+                    if (o.trade_date) document.getElementById("trade_date").value = o.trade_date;
+                    if (o.expiry_date) document.getElementById("expiry_date").value = o.expiry_date;
+                    if (o.nifty_open != null && o.nifty_open !== "") document.getElementById("nifty_open").value = o.nifty_open;
+                    if (o.atr != null && o.atr !== "") document.getElementById("atr").value = o.atr;
+                    if (o.ce_strike != null && o.ce_strike !== "") document.getElementById("ce_strike").value = o.ce_strike;
+                    if (o.pe_strike != null && o.pe_strike !== "") document.getElementById("pe_strike").value = o.pe_strike;
+                } catch (_) { /* ignore */ }
+            }
+            ["trade_date", "expiry_date", "nifty_open", "atr", "ce_strike", "pe_strike"].forEach((id) => {
+                const el = document.getElementById(id);
+                el.addEventListener("change", saveFormToSession);
+                el.addEventListener("input", saveFormToSession);
+            });
+            loadFormFromSession();
+            (async () => {
+                await loadPreferredExpiryFromConfig();
+                if (document.getElementById("trade_date").value) {
+                    // Only auto-fill expiry when session did not already restore one
+                    const expEl = document.getElementById("expiry_date");
+                    if (!expEl.value || preferredExpiryFromEnv) {
+                        autoSetExpiryFromTradeDate();
+                    }
+                    fetchNiftyDailyPrevOpenAtr();
+                }
+            })();
+
+            /**
+             * Single status pill next to Submit (hidden when idle). Color + icon + short phrase — no separate "Status" label.
+             * @param {"idle"|"running"|"done"|"error"} mode
+             * @param {string} [text]
+             */
+            function setStatusState(mode, text) {
+                const wrap = document.getElementById("statusWrap");
+                const el = document.getElementById("status");
+                if (!wrap || !el) return;
+                wrap.classList.remove("state-idle", "state-running", "state-done", "state-error");
+                wrap.classList.add("state-" + mode);
+                wrap.setAttribute("aria-busy", mode === "running" ? "true" : "false");
+                if (mode === "idle") {
+                    el.textContent = "";
+                } else {
+                    el.textContent = text != null ? text : "";
+                }
+            }
+
+            setStatusState("idle");
+
+            document.getElementById("btnCancel").addEventListener("click", function () {
+                if (fetchAbortController) {
+                    fetchAbortController.abort();
+                }
+            });
+            document.addEventListener("keydown", function (ev) {
+                if (ev.key === "Escape" && fetchAbortController) {
+                    fetchAbortController.abort();
+                }
+            });
+
+            function buildPayload() {
+                const trade_date = document.getElementById("trade_date").value;
+                const expiry_date = document.getElementById("expiry_date").value;
+                const nifty_open = Number(document.getElementById("nifty_open").value);
+                const atrRaw = document.getElementById("atr").value.trim();
+                const ceRaw = document.getElementById("ce_strike").value.trim();
+                const peRaw = document.getElementById("pe_strike").value.trim();
+                const atr = atrRaw === "" ? NaN : Number(atrRaw);
+                const hasAt = atrRaw !== "" && Number.isFinite(atr) && atr > 0;
+                const hasCe = ceRaw !== "";
+                const hasPe = peRaw !== "";
+                if (hasCe !== hasPe) {
+                    throw new Error("Provide both CE and PE strikes, or neither (auto ATM from Nifty open).");
+                }
+                if (hasAt && hasCe && hasPe) {
+                    throw new Error("Clear ATR when using manual CE+PE, or clear CE/PE for auto strikes.");
+                }
+                const base = { trade_date, expiry_date, nifty_open };
+                if (hasCe && hasPe) {
+                    const ce = parseInt(ceRaw, 10);
+                    const pe = parseInt(peRaw, 10);
+                    if (!Number.isFinite(ce) || !Number.isFinite(pe) || ce <= 0 || pe <= 0) {
+                        throw new Error("CE and PE strikes must be positive integers.");
+                    }
+                    return { ...base, ce_strike: ce, pe_strike: pe };
+                }
+                if (!Number.isFinite(nifty_open) || nifty_open <= 0) {
+                    throw new Error("Enter today’s Nifty cash open (spot), or set CE and PE strikes.");
+                }
+                const out = { ...base };
+                if (hasAt) out.atr = atr;
+                return out;
+            }
+
+            async function httpErrorMessage(r) {
+                const txt = await r.text();
+                try {
+                    const j = JSON.parse(txt);
+                    if (Array.isArray(j.detail)) {
+                        return j.detail
+                            .map((d) => (typeof d === "string" ? d : d.msg || JSON.stringify(d)))
+                            .join(" ");
+                    }
+                    if (typeof j.detail === "string") return j.detail;
+                    if (j.message) return j.message;
+                } catch (_) { /* ignore */ }
+                return txt || ("HTTP " + r.status);
+            }
+
+            function toHHMM(ts) {
+                // ts example: "2025-12-01 09:15:00" from server
+                if (ts == null || String(ts).trim() === "") return "";
+                const parts = String(ts).trim().split(/\s+/);
+                return parts.length >= 2 ? parts[1].slice(0, 5) : String(ts).slice(0, 5);
+            }
+
+            function fmtNum(x, digits=2) {
+                const n = Number(x);
+                if (!isFinite(n)) return "-";
+                return n.toFixed(digits);
+            }
+
+            let premiumChart = null;
+            let volumeDiffChart = null;
+
+            /** Clear Chart.js series so a new Submit doesn’t show the previous run while loading. */
+            function clearCharts() {
+                if (premiumChart) {
+                    premiumChart.data.labels = [];
+                    premiumChart.data.datasets.forEach(function (ds) {
+                        ds.data = [];
+                    });
+                    premiumChart.update("none");
+                }
+                if (volumeDiffChart) {
+                    volumeDiffChart.data.labels = [];
+                    volumeDiffChart.data.datasets[0].data = [];
+                    volumeDiffChart.update("none");
+                }
+            }
+
+            function ensureCharts() {
+                if (!premiumChart) {
+                    const charts = window.StrangleChartCore.createStrangleCharts({
+                        premiumCanvasId: "premiumChart",
+                        volumeCanvasId: "volumeDiffChart",
+                        volumeUnitLabel: "Lakhs",
+                        xAxisTime: false,
+                        volumeXAxisTime: false,
+                        includeTarget: false,
+                    });
+                    premiumChart = charts.premiumChart;
+                    volumeDiffChart = charts.volumeChart;
+                }
+            }
+
+            /** Running max lines + purple scatter (joint new high/low after 10:00). */
+            function ensurePremiumAuxDatasets() {
+                ensureCharts();
+                if (premiumChart.data.datasets.length >= 5) return;
+                premiumChart.data.datasets.push(
+                    {
+                        label: "Run max (premium close)",
+                        data: [],
+                        yAxisID: "y",
+                        borderColor: "rgba(255, 160, 160, 0.65)",
+                        borderWidth: 1.2,
+                        borderDash: [5, 4],
+                        fill: false,
+                        tension: 0,
+                        pointRadius: 0,
+                        order: 1,
+                    },
+                    {
+                        label: "Run max (Nifty close)",
+                        data: [],
+                        yAxisID: "y1",
+                        borderColor: "rgba(120, 190, 255, 0.65)",
+                        borderWidth: 1.2,
+                        borderDash: [5, 4],
+                        fill: false,
+                        tension: 0,
+                        pointRadius: 0,
+                        order: 1,
+                    },
+                    {
+                        type: "scatter",
+                        label: "Both new high or new low (from 10:00)",
+                        data: [],
+                        yAxisID: "y",
+                        showLine: false,
+                        pointStyle: "circle",
+                        /* Fuchsia fill + white ring — readable on dark chart & red premium line */
+                        pointRadius: 6,
+                        pointHoverRadius: 9,
+                        pointBackgroundColor: "#d946ef",
+                        pointBorderColor: "#ffffff",
+                        pointBorderWidth: 2,
+                        order: 100,
+                    }
+                );
+            }
+
+            /** IST bar time: true for clock ≥ 10:00 (naive timestamp string from server). */
+            function barTimeFrom10Am(tsRaw) {
+                const s = normalizeTs(tsRaw);
+                const m = s.match(/\s(\d{2}):(\d{2}):/);
+                if (!m) return false;
+                const hh = parseInt(m[1], 10);
+                const mm = parseInt(m[2], 10);
+                return hh > 10 || (hh === 10 && mm >= 0);
+            }
+
+            function normalizeTs(ts) {
+                    if (ts == null) return "";
+                    let s = String(ts).trim().replace("T", " ");
+                    if (s.length >= 19) s = s.slice(0, 19);
+                    return s;
+                }
+
+            function updateCharts(resp) {
+                ensurePremiumAuxDatasets();
+                // Premium series: from response "strangle_premium_1m"
+                const premiumSeries = resp.strangle_premium_1m || [];
+                const niftyHistory = resp.nifty_history || [];
+                const niftyMap = new Map();
+                for (const c of niftyHistory) {
+                    niftyMap.set(normalizeTs(c.timestamp), c);
+                }
+                const labels = [];
+                const premiumData = [];
+                const niftyData = [];
+                const timestamps = [];
+                for (const p of premiumSeries) {
+                    const ts = normalizeTs(p.timestamp);
+                    const nifty = niftyMap.get(ts);
+                    labels.push(toHHMM(ts));
+                    timestamps.push(ts);
+                    premiumData.push(p.total_premium);
+                    niftyData.push(nifty ? nifty.close : null); // Nifty line can have gaps
+                }
+                premiumChart.data.labels = labels;
+                premiumChart.data.datasets[0].data = premiumData;
+                premiumChart.data.datasets[1].data = niftyData;
+
+                const n = premiumData.length;
+                // Cumulative max closes (for dashed lines): highest prem / Nifty close seen so far including this bar
+                let cumMaxP = -Infinity;
+                let cumMaxN = -Infinity;
+                const runMaxP = [];
+                const runMaxN = [];
+                for (let i = 0; i < n; i++) {
+                    const pr = premiumData[i];
+                    const nx = niftyData[i];
+                    if (pr != null && isFinite(pr)) {
+                        cumMaxP = cumMaxP === -Infinity ? pr : Math.max(cumMaxP, pr);
+                    }
+                    if (nx != null && isFinite(nx)) {
+                        cumMaxN = cumMaxN === -Infinity ? nx : Math.max(cumMaxN, nx);
+                    }
+                    runMaxP.push(cumMaxP === -Infinity ? null : cumMaxP);
+                    runMaxN.push(cumMaxN === -Infinity ? null : cumMaxN);
+                }
+                // Purple dots: from 10:00 onward, same bar where BOTH make a new high vs all prior closes,
+                // or BOTH make a new low vs all prior closes (Nifty gap bars skip dots).
+                let maxPBefore = -Infinity;
+                let maxNBefore = -Infinity;
+                let minPBefore = Infinity;
+                let minNBefore = Infinity;
+                const jointMarkerY = [];
+                for (let i = 0; i < n; i++) {
+                    const pr = premiumData[i];
+                    const nx = niftyData[i];
+                    let dot = null;
+                    if (
+                        barTimeFrom10Am(timestamps[i]) &&
+                        i > 0 &&
+                        pr != null &&
+                        isFinite(pr) &&
+                        nx != null &&
+                        isFinite(nx) &&
+                        maxPBefore > -Infinity &&
+                        maxNBefore > -Infinity &&
+                        minPBefore < Infinity &&
+                        minNBefore < Infinity
+                    ) {
+                        const jointHigh = pr > maxPBefore && nx > maxNBefore;
+                        const jointLow = pr < minPBefore && nx < minNBefore;
+                        const premiumHighNiftyLow = pr > maxPBefore && nx < minNBefore;
+                        if (jointHigh || jointLow || premiumHighNiftyLow) {
+                            dot = pr;
+                        }
+                    }
+                    jointMarkerY.push(dot);
+                    if (pr != null && isFinite(pr)) {
+                        maxPBefore = maxPBefore === -Infinity ? pr : Math.max(maxPBefore, pr);
+                        minPBefore = minPBefore === Infinity ? pr : Math.min(minPBefore, pr);
+                    }
+                    if (nx != null && isFinite(nx)) {
+                        maxNBefore = maxNBefore === -Infinity ? nx : Math.max(maxNBefore, nx);
+                        minNBefore = minNBefore === Infinity ? nx : Math.min(minNBefore, nx);
+                    }
+                }
+                premiumChart.data.datasets[2].data = runMaxP;
+                premiumChart.data.datasets[3].data = runMaxN;
+                premiumChart.data.datasets[4].data = jointMarkerY;
+                premiumChart.update("none");
+                // Volume diff: Crores if trade date === expiry (same calendar day), else Lakhs
+                const inp = resp.inputs || {};
+                const tdStr = String(inp.trade_date ?? "").slice(0, 10);
+                const edStr = String(inp.expiry_date ?? "").slice(0, 10);
+                const sameTradeAndExpiry =
+                    tdStr.length === 10 && edStr.length === 10 && tdStr === edStr;
+                const volDivisor = sameTradeAndExpiry ? 1e7 : 1e5;
+                const volUnit = sameTradeAndExpiry ? "Crores" : "Lakhs";
+                const ce = resp.ce_history || [];
+                const pe = resp.pe_history || [];
+                const peVolMap = new Map();
+                for (const x of pe) peVolMap.set(x.timestamp, x.volume);
+                const vLabels = [];
+                const vDiff = [];
+                for (const c of ce) {
+                if (!peVolMap.has(c.timestamp)) continue;
+                const diffShares = (c.volume || 0) - (peVolMap.get(c.timestamp) || 0);
+                vLabels.push(toHHMM(c.timestamp));
+                vDiff.push(diffShares / volDivisor);
+                }
+                window.StrangleChartCore.applyVolumeDiffSeries(volumeDiffChart, {
+                    labels: vLabels,
+                    values: vDiff,
+                    unit: volUnit,
+                    titleElement: document.getElementById("chart2_volume_title"),
+                });
+                // Stats
+                const stats = document.getElementById("stats");
+                stats.style.display = "grid";
+                const niftyRangeEl = document.getElementById("nifty_range_stat");
+                // Nifty day range: High − Low from nifty_daily (SQLite) for the trade date — see API nifty_daily_trade_date
+                const nd = resp.nifty_daily_trade_date;
+                const niftyRange =
+                    nd && nd.range != null && Number.isFinite(Number(nd.range)) ? Number(nd.range) : NaN;
+                if (niftyRangeEl) {
+                    niftyRangeEl.textContent = Number.isFinite(niftyRange) ? fmtNum(niftyRange, 2) : "—";
+                }
+                if (premiumSeries.length > 0) {
+                // premiumSeries might include timestamps not present in niftyHistory; we still compute from its array
+                const start = premiumSeries[0].total_premium;
+                const end = premiumSeries[premiumSeries.length - 1].total_premium;
+                document.getElementById("prem_start").textContent = fmtNum(start, 2);
+                document.getElementById("prem_end").textContent = fmtNum(end, 2);
+                } else {
+                document.getElementById("prem_start").textContent = "-";
+                document.getElementById("prem_end").textContent = "-";
+                }
+            }
+            document.getElementById("form").addEventListener("submit", async (e) => {
+                e.preventDefault();
+                clearCharts();
+                const errEl = document.getElementById("error");
+                errEl.style.display = "none";
+                errEl.style.color = "";
+                const dataSrcLine = document.getElementById("data_sources_line");
+                if (dataSrcLine) {
+                    dataSrcLine.style.display = "none";
+                    dataSrcLine.textContent = "";
+                }
+                document.getElementById("stats").style.display = "none";
+                let payload;
+                try {
+                    payload = buildPayload();
+                } catch (ve) {
+                    errEl.style.display = "block";
+                    errEl.textContent = String(ve?.message || ve);
+                    setStatusState("error", "Failed");
+                    return;
+                }
+                fetchAbortController = new AbortController();
+                setSubmitLoading(true);
+                setStatusState("running", "Fetching data…");
+                try {
+                const r = await fetch(apiUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                    signal: fetchAbortController.signal,
+                });
+                if (!r.ok) {
+                    throw new Error(await httpErrorMessage(r));
+                }
+                const resp = await r.json();
+                if (resp.status !== "ok") {
+                    throw new Error(resp.message || "No data available");
+                }
+                document.getElementById("stat_ce_strike").textContent = resp.strikes?.ce_strike ?? "-";
+                document.getElementById("stat_pe_strike").textContent = resp.strikes?.pe_strike ?? "-";
+                if (!resp.strangle_premium_1m || resp.strangle_premium_1m.length === 0) {
+                    const ceN = (resp.ce_history || []).length;
+                    const peN = (resp.pe_history || []).length;
+                    const src = resp.data_sources?.strangle_ce_pe || resp.data_sources?.historical_broker || "broker";
+                    const strikes = resp.strikes || {};
+                    throw new Error(
+                        `No CE/PE 1m bars (CE=${ceN}, PE=${peN}, strikes CE=${strikes.ce_strike ?? "?"} PE=${strikes.pe_strike ?? "?"}, source=${src}). ` +
+                        "Check trade date is a trading day and expiry matches the contract " +
+                        "(set NIFTY_EXPIRY_DATE in .env for holiday/monthly weeks; Fyers ticker is chosen automatically from that date)."
+                    );
+                }
+                updateCharts(resp);
+                const ds = resp.data_sources;
+                if (dataSrcLine && ds) {
+                    dataSrcLine.style.display = "block";
+                    const legSrc = ds.strangle_ce_pe === "database" ? "SQLite (cache)" : ((ds.strangle_ce_pe || ds.historical_broker || "API") + " API");
+                    const niftySrc = ds.nifty_index === "database" ? "SQLite (cache)" : ((ds.nifty_index || ds.historical_broker || "API") + " API");
+                    let line =
+                        "Data sources — CE/PE: " +
+                        legSrc +
+                        " · Nifty: " +
+                        niftySrc;
+                    if (resp.cache_sqlite_path) {
+                        line += " · File: " + resp.cache_sqlite_path;
+                    }
+                    dataSrcLine.textContent = line;
+                }
+                setStatusState("done", "Loaded");
+                } catch (err) {
+                if (err && err.name === "AbortError") {
+                    errEl.style.display = "block";
+                    errEl.style.color = "#9fd4ff";
+                    errEl.textContent = "Request cancelled.";
+                    setStatusState("idle", "");
+                } else {
+                    errEl.style.display = "block";
+                    errEl.style.color = "";
+                    errEl.textContent = String(err?.message || err);
+                    setStatusState("error", "Failed");
+                }
+                } finally {
+                fetchAbortController = null;
+                setSubmitLoading(false);
+                }
+            });
+
+
+        </script>
+           
+    </body>
+</html>

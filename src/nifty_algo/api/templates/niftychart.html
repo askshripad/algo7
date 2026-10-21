@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Nifty Chart</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="/static/js/nifty-chart-core.js?v=20261019g"></script>
+    <style>
+        html { color-scheme: light; height: 100%; }
+        :root { --bg:#f4f6f8; --card:#ffffff; --text:#111827; --muted:#4b5563; --accent:#0f766e; --line:#e5e7eb; }
+        body {
+          margin: 0; padding: 6px 8px;
+          font-family: Arial, sans-serif;
+          background: var(--bg); color: var(--text);
+          height: 100vh; height: 100dvh;
+          overflow: hidden;
+        }
+        .container {
+          width: 100%; max-width: 100%;
+          height: calc(100vh - 12px); height: calc(100dvh - 12px);
+          display: flex; flex-direction: column; gap: 4px; min-height: 0;
+        }
+        .top-row {
+          display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+          padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px;
+          background: #fff; flex-shrink: 0;
+        }
+        .status {
+          font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px;
+          border: 1px solid var(--line); background: #f8fafc; color: #1d4ed8;
+          margin-left: auto;
+        }
+        .status.live { color: #15803d; }
+        .status.waiting { color: #b45309; }
+        .top-row label { font-size: 11px; color: #1f2937; display: inline-flex; align-items: center; gap: 4px; }
+        .top-row input[type="date"], .level-bar input[type="number"] {
+          background: #fff; color: #111827; border: 1px solid #d1d5db;
+          border-radius: 5px; padding: 3px 6px; font-size: 11px;
+        }
+        .btn {
+          font-size: 11px; font-weight: 600; cursor: pointer; padding: 4px 10px;
+          border-radius: 6px; border: 1px solid #d1d5db;
+          background: #fff; color: #111827;
+        }
+        .btn:hover:not(:disabled) { border-color: var(--accent); }
+        .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .btn-start { border-color: #86efac; background: #f0fdf4; color: #166534; }
+        .btn-stop { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+        .mode-segment {
+          display: inline-flex; padding: 2px; border-radius: 999px;
+          background: #f3f4f6; border: 1px solid var(--line); gap: 2px;
+        }
+        .mode-segment button {
+          border: none; border-radius: 999px; padding: 4px 12px;
+          font-size: 11px; font-weight: 700; cursor: pointer;
+          background: transparent; color: var(--muted);
+        }
+        .mode-segment button.is-active { background: var(--accent); color: #fff; }
+        #algo-status-text { font-size: 11px; color: var(--muted); }
+        #chart-message { font-size: 11px; color: #b91c1c; min-height: 0; flex-shrink: 0; }
+        #chart-message:empty { display: none; }
+        #put-flow-banner {
+          display: block; flex-shrink: 0;
+          padding: 5px 10px; border-radius: 6px;
+          background: linear-gradient(90deg, #5b21b6, #7c3aed);
+          color: #f5f3ff; font-size: 11px; font-weight: 700;
+          text-align: center; letter-spacing: 0.03em;
+          border: 1px solid #a78bfa;
+          animation: putflow-pulse 2s ease-in-out infinite;
+        }
+        #put-flow-banner[hidden] { display: none !important; }
+        @keyframes putflow-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(167, 139, 250, 0.45); }
+          50% { box-shadow: 0 0 12px 2px rgba(167, 139, 250, 0.55); }
+        }
+        body.put-flow-active .card-premium {
+          border-color: #a855f7;
+          box-shadow: 0 0 0 1px rgba(168, 85, 247, 0.45), inset 0 0 24px rgba(109, 40, 217, 0.12);
+        }
+        body.put-flow-active .top-row { border-color: #6d28d9; }
+        .layer-toggles, .level-bar {
+          display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+          padding: 3px 8px; flex-shrink: 0;
+          font-size: 10px; color: var(--muted);
+          border: 1px solid var(--line); border-radius: 6px; background: #fff;
+        }
+        .layer-toggles span, .level-bar > span { color: #374151; font-weight: 600; margin-right: 2px; }
+        .layer-toggles label {
+          display: inline-flex; align-items: center; gap: 3px;
+          cursor: pointer; color: #1f2937; user-select: none;
+        }
+        .layer-toggles input { margin: 0; accent-color: var(--accent); }
+        .swatch {
+          width: 9px; height: 9px; border-radius: 2px; display: inline-block; flex-shrink: 0;
+          box-shadow: inset 0 0 0 1px rgba(0,0,0,0.18);
+        }
+        .swatch.dash {
+          background:
+            repeating-linear-gradient(90deg, var(--c, #fff) 0 3px, transparent 3px 5px) !important;
+          box-shadow: none;
+        }
+        .legend-note {
+          display: inline-flex; align-items: center; gap: 4px;
+          color: #4b5563; font-size: 10px;
+        }
+        .dot {
+          width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+          background: #1d4ed8; box-shadow: 0 0 0 1.5px #111827;
+        }
+        .sq {
+          width: 8px; height: 8px; display: inline-block;
+          background: #6d28d9; box-shadow: 0 0 0 1.5px #dc2626;
+        }
+        .sq.sq-pe { box-shadow: 0 0 0 1.5px #65a30d; }
+        .charts-grid {
+          flex: 1 1 auto; min-height: 0;
+          display: grid;
+          grid-template-rows: minmax(0, 1.4fr) minmax(0, 0.85fr);
+          grid-template-columns: 1fr 1fr;
+          gap: 4px;
+        }
+        .charts-grid.volumes-collapsed {
+          grid-template-rows: minmax(0, 1fr);
+          grid-template-columns: 1fr;
+        }
+        .charts-grid.volumes-collapsed .card-volume { display: none; }
+        .card-premium { grid-column: 1 / -1; }
+        .chart-readout {
+          position: absolute; top: 4px; right: 6px; z-index: 2;
+          display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px;
+          max-width: 70%; pointer-events: none;
+        }
+        .chart-readout .chip {
+          font-size: 10px; font-weight: 600; color: #111827;
+          background: rgba(255, 255, 255, 0.94);
+          border: 1px solid var(--line); border-radius: 4px;
+          padding: 2px 6px; font-variant-numeric: tabular-nums;
+        }
+        .chart-readout b { color: inherit; font-weight: 700; }
+        .card {
+          background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+          padding: 6px; display: flex; flex-direction: column; min-height: 0; position: relative;
+        }
+        .card h2 {
+          position: absolute; top: 4px; left: 6px; margin: 0;
+          font-size: 10px; font-weight: 600; color: #111827;
+          background: rgba(255, 255, 255, 0.92); border: 1px solid var(--line);
+          border-radius: 4px; padding: 1px 6px; z-index: 2; pointer-events: none;
+        }
+        .card canvas { width: 100% !important; height: 100% !important; flex: 1; min-height: 0 !important; }
+        .level-bar { gap: 6px; }
+        .level-bar input[type="number"] { width: 92px; }
+        .level-bar input[type="color"] {
+          width: 22px; height: 18px; padding: 0; border: 1px solid #d1d5db;
+          border-radius: 3px; background: #fff; cursor: pointer;
+        }
+        .level-presets { display: inline-flex; gap: 3px; }
+        .level-preset {
+          width: 14px; height: 14px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.2);
+          padding: 0; cursor: pointer;
+        }
+        .level-list { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+        .level-chip {
+          display: inline-flex; align-items: center; gap: 4px;
+          border: 1px solid var(--line); border-radius: 999px;
+          padding: 1px 4px 1px 3px; background: #f8fafc;
+          font-size: 11px; font-weight: 700; color: #111827;
+          font-variant-numeric: tabular-nums;
+        }
+        .level-chip input[type="color"] { width: 16px; height: 16px; border: none; padding: 0; }
+        .level-chip button {
+          border: none; background: transparent; color: #6b7280;
+          cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px;
+        }
+        .level-chip button:hover { color: #991b1b; }
+        #arrow-arm.is-armed,
+        .arrow-dir.is-active { background: #111827; color: #fff; border-color: #111827; }
+        body.arrow-armed #premiumChart { cursor: crosshair; }
+        @media (max-width: 768px) {
+          body { overflow: auto; height: auto; }
+          .container { height: auto; min-height: 100dvh; }
+          .charts-grid { grid-template-rows: 45vh 28vh 28vh; grid-template-columns: 1fr; }
+          .charts-grid.volumes-collapsed { grid-template-rows: 72vh; }
+          .card-premium { grid-column: 1; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="top-row">
+        <button type="button" id="algo-start-btn" class="btn btn-start">Start algo</button>
+        <button type="button" id="algo-stop-btn" class="btn btn-stop" disabled>Stop algo</button>
+        <span id="algo-status-text"></span>
+        <label for="historical-date">Date <input type="date" id="historical-date" /></label>
+        <button type="button" id="historical-load-btn" class="btn">Load</button>
+        <div class="mode-segment">
+            <button type="button" id="mode-live" class="is-active">Live</button>
+            <button type="button" id="mode-hist">Hist</button>
+        </div>
+        <div id="status" class="status waiting">Connecting…</div>
+    </div>
+    <div id="chart-message"></div>
+    <div id="put-flow-banner" hidden>PUT FLOW — VR PE premium &gt; VR CE premium (bullish hedging / put writing)</div>
+
+    <div class="layer-toggles" id="premium-layer-toggles">
+        <span>Show:</span>
+        <label title="Volume range premium (right axis)"><input type="checkbox" id="ly-vr-prem" checked /> <i class="swatch" style="background:#a16207"></i> VR prem</label>
+        <label title="Nifty spot (left axis)"><input type="checkbox" id="ly-nifty" checked /> <i class="swatch" style="background:#111827"></i> Nifty</label>
+        <label><input type="checkbox" id="ly-candles" checked /> <i class="swatch" style="background:linear-gradient(90deg,#65a30d 50%,#e11d48 50%)"></i> 5m candles</label>
+        <label title="Opening range high (green) and low (orange)"><input type="checkbox" id="ly-or" checked /> <i class="swatch dash" style="--c:#15803d"></i><i class="swatch dash" style="--c:#ea580c"></i> OR</label>
+        <label><input type="checkbox" id="ly-vr-ce" checked /> <i class="swatch" style="background:#dc2626"></i> VR CE</label>
+        <label><input type="checkbox" id="ly-vr-pe" checked /> <i class="swatch" style="background:#1d4ed8"></i> VR PE</label>
+        <label><input type="checkbox" id="ly-otm-ce" /> <i class="swatch" style="background:#a21caf"></i> OTM CE</label>
+        <label><input type="checkbox" id="ly-otm-pe" /> <i class="swatch" style="background:#0f766e"></i> OTM PE</label>
+        <label><input type="checkbox" id="ly-volumes" /> Volumes</label>
+        <span class="legend-note"><i class="dot"></i> first PE&gt;CE after 09:45</span>
+        <span class="legend-note" title="Purple square. Red border: call volume gap is larger. Lime border: put volume gap is larger."><i class="sq"></i> CE <i class="sq sq-pe"></i> PE · |VR vol| ≥ 2×</span>
+    </div>
+
+    <div class="level-bar" id="level-bar">
+        <span>Level</span>
+        <input type="number" id="level-price" inputmode="decimal" step="0.1" min="1" placeholder="23052" title="Nifty price for a horizontal line" />
+        <input type="color" id="level-color" value="#0e7490" title="Line color" />
+        <span class="level-presets" id="level-presets">
+            <button type="button" class="level-preset" data-color="#0e7490" style="background:#0e7490" title="Teal"></button>
+            <button type="button" class="level-preset" data-color="#111827" style="background:#111827" title="Black"></button>
+            <button type="button" class="level-preset" data-color="#7c3aed" style="background:#7c3aed" title="Purple"></button>
+            <button type="button" class="level-preset" data-color="#be123c" style="background:#be123c" title="Crimson"></button>
+            <button type="button" class="level-preset" data-color="#0369a1" style="background:#0369a1" title="Blue"></button>
+        </span>
+        <button type="button" id="level-add" class="btn">Add</button>
+        <div class="level-list" id="level-list"></div>
+    </div>
+
+    <div class="level-bar" id="arrow-bar">
+        <span>Arrow</span>
+        <button type="button" id="arrow-up" class="btn arrow-dir is-active">Up</button>
+        <button type="button" id="arrow-down" class="btn arrow-dir">Down</button>
+        <input type="color" id="arrow-color" value="#15803d" title="Arrow color" />
+        <button type="button" id="arrow-arm" class="btn">Place on candle</button>
+        <div class="level-list" id="arrow-list"></div>
+    </div>
+
+    <div class="charts-grid volumes-collapsed" id="charts-grid">
+        <div class="card card-premium">
+            <h2>Premium + Nifty</h2>
+            <div class="chart-readout" id="chart-readout">
+                <span class="chip" style="color:#111827">Nifty <b id="rd-nifty">—</b></span>
+                <span class="chip" style="color:#a16207">VR prem <b id="rd-prem">—</b></span>
+                <span class="chip" style="color:#15803d">OR H <b id="rd-orh">—</b></span>
+                <span class="chip" style="color:#ea580c">OR L <b id="rd-orl">—</b></span>
+                <span class="chip" style="color:#6d28d9">Vol ×2 <b id="rd-sq">0</b></span>
+            </div>
+            <canvas id="premiumChart"></canvas>
+        </div>
+        <div class="card card-volume"><h2 id="vr-vol-title">VR volume</h2><canvas id="vrVolumeChart"></canvas></div>
+        <div class="card card-volume"><h2 id="off-vol-title">Offset volume</h2><canvas id="offsetVolumeChart"></canvas></div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const NC = window.NiftyChartCore;
+    const charts = NC.createNiftyCharts({
+        premiumCanvasId: "premiumChart",
+        vrVolumeCanvasId: "vrVolumeChart",
+        offsetVolumeCanvasId: "offsetVolumeChart",
+        volumeUnitLabel: "Lakhs",
+    });
+
+    let volumeDisplay = { unit: "Lakhs", divisor: 1e5 };
+    let orLevels = { or_high: null, or_low: null };
+    let chartData = {
+        vrPremium: [], otmPremium: [], nifty: [],
+        vrCeStrike: [], vrPeStrike: [], otmCeStrike: [], otmPeStrike: [],
+        putFlowScatter: [], putFlowActive: false,
+        vrVolLabels: [], vrCeVolValues: [], vrPeVolValues: [],
+        offVolLabels: [], offVolValues: [], vrVolDiffValues: [],
+    };
+    let isHistorical = false;
+    let ws = null;
+
+    function toNum(v, fb) {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : fb;
+    }
+    function validPrice(v) {
+        const n = toNum(v, null);
+        return n != null && n > 0 ? n : null;
+    }
+    function validStrike(v) {
+        const n = toNum(v, null);
+        return n != null && n > 0 ? n : null;
+    }
+    function validSpot(v) {
+        const n = toNum(v, null);
+        return n != null && n > 1000 ? n : null;
+    }
+    function setMsg(t) {
+        const el = document.getElementById("chart-message");
+        if (!el) return;
+        el.textContent = t || "";
+    }
+
+    function setVolumeDisplay(vc) {
+        if (!vc || !vc.divisor) return;
+        volumeDisplay = { unit: vc.unit || "Lakhs", divisor: Number(vc.divisor) };
+    }
+
+    function rowToChartData(h) {
+        const ts = new Date(h.timestamp);
+        const div = volumeDisplay.divisor;
+        const vrPrem = validPrice(h.vr_total_premium);
+        const vrCeP = validPrice(h.vr_ce_price);
+        const vrPeP = validPrice(h.vr_pe_price);
+        const putFlow = h.put_flow_signal === true && vrCeP != null && vrPeP != null;
+        return {
+            vrPremium: { x: ts, y: vrPrem },
+            otmPremium: { x: ts, y: validPrice(h.otm_total_premium) },
+            nifty: { x: ts, y: validSpot(h.spot_price) },
+            vrCeStrike: { x: ts, y: validStrike(h.vr_ce_strike) },
+            vrPeStrike: { x: ts, y: validStrike(h.vr_pe_strike) },
+            otmCeStrike: { x: ts, y: validStrike(h.otm_ce_strike) },
+            otmPeStrike: { x: ts, y: validStrike(h.otm_pe_strike) },
+            putFlowScatter: putFlow && vrPrem != null ? { x: ts, y: vrPrem } : null,
+            putFlow,
+            vrCeVol: toNum(h.vr_ce_volume, 0) / div,
+            vrPeVol: toNum(h.vr_pe_volume, 0) / div,
+            vrVolDiff: (toNum(h.vr_volume_diff, null) ?? (toNum(h.vr_ce_volume, 0) - toNum(h.vr_pe_volume, 0))) / div,
+            offVol: (toNum(h.offset_volume_diff, null) ?? (toNum(h.offset_ce_volume,0) - toNum(h.offset_pe_volume,0))) / div,
+            label: NC.toHHMM(ts),
+            or_high: validPrice(h.or_high),
+            or_low: validPrice(h.or_low),
+        };
+    }
+
+    function mergeOrLevels(rows, orLv) {
+        const o = {
+            or_high: orLv?.or_high > 0 ? orLv.or_high : null,
+            or_low: orLv?.or_low > 0 ? orLv.or_low : null,
+        };
+        (rows || []).forEach(h => {
+            const oh = validPrice(h.or_high);
+            const ol = validPrice(h.or_low);
+            if (oh != null) o.or_high = oh;
+            if (ol != null) o.or_low = ol;
+        });
+        return o;
+    }
+
+    function updateStats(cur) {
+        const st = document.getElementById("status");
+        if (!cur) {
+            st.className = "status waiting";
+            st.textContent = "Waiting…";
+            return;
+        }
+        st.className = "status live";
+        const spot = cur.spot_price != null ? Number(cur.spot_price).toFixed(1) : "—";
+        const vr = cur.call_volume_range && cur.put_volume_range
+            ? `${cur.call_volume_range} | ${cur.put_volume_range}` : "";
+        const flow = cur.put_flow_signal ? " · PUT FLOW" : "";
+        st.textContent = `CE ${cur.vr_ce_strike ?? "—"} PE ${cur.vr_pe_strike ?? "—"} · ${spot}${vr ? " · " + vr : ""}${flow}`;
+    }
+
+    function lastY(series) {
+        for (let i = (series || []).length - 1; i >= 0; i--) {
+            const y = series[i] && series[i].y;
+            if (y != null && isFinite(y)) return y;
+        }
+        return null;
+    }
+    function fmtPx(v) {
+        return v != null && isFinite(v) ? Number(v).toFixed(1) : "—";
+    }
+    function updateReadout() {
+        const n = document.getElementById("rd-nifty");
+        const p = document.getElementById("rd-prem");
+        const h = document.getElementById("rd-orh");
+        const l = document.getElementById("rd-orl");
+        const s = document.getElementById("rd-sq");
+        if (n) n.textContent = fmtPx(lastY(chartData.nifty));
+        if (p) p.textContent = fmtPx(lastY(chartData.vrPremium));
+        if (h) h.textContent = fmtPx(orLevels.or_high);
+        if (l) l.textContent = fmtPx(orLevels.or_low);
+        if (s) s.textContent = String(charts.premiumChart.$volDoubleCount || 0);
+    }
+    function volumesVisible() {
+        return !!document.getElementById("ly-volumes")?.checked;
+    }
+    function applyVolumeLayout() {
+        const grid = document.getElementById("charts-grid");
+        if (!grid) return;
+        grid.classList.toggle("volumes-collapsed", !volumesVisible());
+        requestAnimationFrame(() => {
+            try {
+                charts.premiumChart.resize();
+                if (volumesVisible()) {
+                    charts.vrVolumeChart.resize();
+                    charts.offsetVolumeChart.resize();
+                }
+            } catch (e) { /* ignore */ }
+        });
+    }
+
+    function paintCharts() {
+        const active = NC.applyNiftyPremiumChart(charts.premiumChart, chartData, orLevels);
+        NC.applyPremiumLayerVisibility(charts.premiumChart, NC.readPremiumLayersFromDom());
+        NC.setPutFlowChrome(chartData.putFlowActive || active);
+        updateReadout();
+        NC.applyVrVolumeChart(
+            charts.vrVolumeChart,
+            chartData.vrVolLabels,
+            chartData.vrCeVolValues,
+            chartData.vrPeVolValues,
+            volumeDisplay.unit
+        );
+        NC.applyOffsetVolumeChart(
+            charts.offsetVolumeChart,
+            chartData.offVolLabels,
+            chartData.offVolValues,
+            chartData.vrVolDiffValues,
+            volumeDisplay.unit
+        );
+        document.getElementById("vr-vol-title").textContent = `VR vol (${volumeDisplay.unit})`;
+        document.getElementById("off-vol-title").textContent = `Offset & VR diff (${volumeDisplay.unit})`;
+        applyVolumeLayout();
+    }
+
+    function seriesStartMs(rows, field) {
+        for (let i = 0; i < (rows || []).length; i++) {
+            const raw = field ? rows[i] && rows[i][field] : rows[i] && rows[i].x;
+            if (!raw) continue;
+            const ms = raw instanceof Date ? raw.getTime() : new Date(raw).getTime();
+            if (Number.isFinite(ms)) return ms;
+        }
+        return null;
+    }
+    function incomingStartsLater(history) {
+        const loaded = seriesStartMs(chartData.nifty, "x");
+        const incoming = seriesStartMs(history, "timestamp");
+        return loaded != null && incoming != null && incoming > loaded + 2 * 60 * 1000;
+    }
+
+    function loadHistory(history, orLv) {
+        orLevels = mergeOrLevels(history, orLv);
+        chartData = {
+            vrPremium: [], otmPremium: [], nifty: [],
+            vrCeStrike: [], vrPeStrike: [], otmCeStrike: [], otmPeStrike: [],
+            putFlowScatter: [], putFlowActive: false,
+            vrVolLabels: [], vrCeVolValues: [], vrPeVolValues: [],
+            offVolLabels: [], offVolValues: [], vrVolDiffValues: [],
+        };
+        (history || []).forEach(h => {
+            const r = rowToChartData(h);
+            chartData.vrPremium.push(r.vrPremium);
+            chartData.otmPremium.push(r.otmPremium);
+            chartData.nifty.push(r.nifty);
+            chartData.vrCeStrike.push(r.vrCeStrike);
+            chartData.vrPeStrike.push(r.vrPeStrike);
+            chartData.otmCeStrike.push(r.otmCeStrike);
+            chartData.otmPeStrike.push(r.otmPeStrike);
+            if (r.putFlowScatter) chartData.putFlowScatter.push(r.putFlowScatter);
+            chartData.vrVolLabels.push(r.label);
+            chartData.vrCeVolValues.push(r.vrCeVol);
+            chartData.vrPeVolValues.push(r.vrPeVol);
+            chartData.vrVolDiffValues.push(r.vrVolDiff);
+            chartData.offVolLabels.push(r.label);
+            chartData.offVolValues.push(r.offVol);
+        });
+        const last = history && history.length ? history[history.length - 1] : null;
+        chartData.putFlowActive = last?.put_flow_signal === true;
+        paintCharts();
+    }
+
+    function appendPoint(snap) {
+        if (!snap) return;
+        const r = rowToChartData(snap);
+        if (r.or_high != null) orLevels.or_high = r.or_high;
+        if (r.or_low != null) orLevels.or_low = r.or_low;
+        chartData.vrPremium.push(r.vrPremium);
+        chartData.otmPremium.push(r.otmPremium);
+        chartData.nifty.push(r.nifty);
+        chartData.vrCeStrike.push(r.vrCeStrike);
+        chartData.vrPeStrike.push(r.vrPeStrike);
+        chartData.otmCeStrike.push(r.otmCeStrike);
+        chartData.otmPeStrike.push(r.otmPeStrike);
+        if (r.putFlowScatter) chartData.putFlowScatter.push(r.putFlowScatter);
+        chartData.putFlowActive = r.putFlow === true;
+        chartData.vrVolLabels.push(r.label);
+        chartData.vrCeVolValues.push(r.vrCeVol);
+        chartData.vrPeVolValues.push(r.vrPeVol);
+        chartData.vrVolDiffValues.push(r.vrVolDiff);
+        chartData.offVolLabels.push(r.label);
+        chartData.offVolValues.push(r.offVol);
+        paintCharts();
+    }
+
+    async function bootstrapApi() {
+        if (isHistorical) return;
+        try {
+            const r = await fetch("/niftychart/history");
+            const j = await r.json();
+            if (j.status !== "ok" || !j.history?.length) return;
+            setVolumeDisplay(j.volume_chart);
+            if (j.or_levels) orLevels = j.or_levels;
+            updateStats(j.current);
+            loadHistory(j.history);
+            setMsg("");
+        } catch (e) { console.warn(e); }
+    }
+
+    function connectWs() {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        ws = new WebSocket(`${proto}//${location.host}/ws/nifty`);
+        ws.onopen = () => { if (!isHistorical) document.getElementById("status").textContent = "Connected"; };
+        ws.onmessage = (ev) => {
+            if (isHistorical) return;
+            const d = JSON.parse(ev.data);
+            if (d.volume_chart) setVolumeDisplay(d.volume_chart);
+            if (d.or_levels) orLevels = d.or_levels;
+            if (d.type === "initial" || d.type === "refresh") {
+                updateStats(d.nifty_chart);
+                if (d.nifty_chart_history?.length && !incomingStartsLater(d.nifty_chart_history)) {
+                    loadHistory(d.nifty_chart_history, d.or_levels);
+                } else if (!chartData.nifty.length && d.nifty_chart) {
+                    appendPoint(d.nifty_chart);
+                }
+            } else if (d.type === "update") {
+                if (d.nifty_chart) updateStats(d.nifty_chart);
+                if (d.nifty_chart_snapshot) appendPoint(d.nifty_chart_snapshot);
+            }
+        };
+        ws.onclose = () => setTimeout(connectWs, 3000);
+    }
+
+    async function refreshAlgoStatus() {
+        try {
+            const r = await fetch("/algo/status");
+            const j = await r.json();
+            const txt = document.getElementById("algo-status-text");
+            const startBtn = document.getElementById("algo-start-btn");
+            const stopBtn = document.getElementById("algo-stop-btn");
+            if (j.embedded) {
+                txt.textContent = "Embedded";
+                startBtn.disabled = true;
+                stopBtn.disabled = true;
+            } else if (j.running) {
+                txt.textContent = `pid ${j.pid}`;
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+            } else {
+                txt.textContent = "";
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    document.getElementById("algo-start-btn").addEventListener("click", async () => {
+        try {
+            const r = await fetch("/algo/start", { method: "POST" });
+            const j = await r.json();
+            setMsg(j.message || j.status || "");
+            refreshAlgoStatus();
+        } catch (e) { setMsg("Start failed"); }
+    });
+    document.getElementById("algo-stop-btn").addEventListener("click", async () => {
+        try {
+            await fetch("/algo/stop", { method: "POST" });
+            refreshAlgoStatus();
+        } catch (e) { setMsg("Stop failed"); }
+    });
+
+    const dateInput = document.getElementById("historical-date");
+    const today = new Date();
+    dateInput.value = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+    dateInput.max = dateInput.value;
+
+    document.getElementById("mode-live").addEventListener("click", () => {
+        isHistorical = false;
+        document.getElementById("mode-live").classList.add("is-active");
+        document.getElementById("mode-hist").classList.remove("is-active");
+        setMsg("");
+        bootstrapApi();
+    });
+    document.getElementById("mode-hist").addEventListener("click", () => {
+        isHistorical = true;
+        document.getElementById("mode-hist").classList.add("is-active");
+        document.getElementById("mode-live").classList.remove("is-active");
+    });
+    document.getElementById("historical-load-btn").addEventListener("click", async () => {
+        const td = dateInput.value;
+        if (!td) return;
+        isHistorical = true;
+        document.getElementById("mode-hist").classList.add("is-active");
+        document.getElementById("mode-live").classList.remove("is-active");
+        try {
+            const r = await fetch(`/niftychart/history/by-date?trade_date=${encodeURIComponent(td)}`);
+            const j = await r.json();
+            if (j.status !== "ok" || !j.history?.length) { setMsg(j.message || "No data"); return; }
+            setVolumeDisplay(j.volume_chart);
+            updateStats(j.current);
+            loadHistory(j.history, j.or_levels);
+            const src = j.data_source || "";
+            setMsg(
+                src.startsWith("strangle")
+                    ? (j.message || "Loaded from backtest cache (offset strangle).")
+                    : ""
+            );
+        } catch (e) { setMsg("Load failed"); }
+    });
+
+    (function restoreViewPrefs() {
+        try {
+            if (localStorage.getItem("niftychart-volumes") === "1") {
+                document.getElementById("ly-volumes").checked = true;
+            }
+            if (localStorage.getItem("niftychart-candles") === "0") {
+                document.getElementById("ly-candles").checked = false;
+            }
+        } catch (e) { /* ignore */ }
+        applyVolumeLayout();
+        NC.setShowCandles(charts.premiumChart, document.getElementById("ly-candles").checked);
+    })();
+    document.getElementById("ly-volumes").addEventListener("change", () => {
+        try { localStorage.setItem("niftychart-volumes", volumesVisible() ? "1" : "0"); } catch (e) { /* ignore */ }
+        applyVolumeLayout();
+    });
+    document.getElementById("ly-candles").addEventListener("change", () => {
+        const on = document.getElementById("ly-candles").checked;
+        try { localStorage.setItem("niftychart-candles", on ? "1" : "0"); } catch (e) { /* ignore */ }
+        NC.setShowCandles(charts.premiumChart, on);
+    });
+
+    bootstrapApi();
+    connectWs();
+    refreshAlgoStatus();
+    const LEVEL_KEY = "niftychart-user-levels";
+    let userLevels = [];
+    function persistLevels() {
+        try { localStorage.setItem(LEVEL_KEY, JSON.stringify(userLevels)); } catch (e) { /* ignore */ }
+        NC.setUserLevels(charts.premiumChart, userLevels);
+    }
+    function renderLevels() {
+        const list = document.getElementById("level-list");
+        if (!list) return;
+        list.replaceChildren();
+        userLevels.forEach((lv) => {
+            const chip = document.createElement("span");
+            chip.className = "level-chip";
+            const color = document.createElement("input");
+            color.type = "color";
+            color.value = lv.color;
+            color.title = "Change color";
+            color.addEventListener("input", () => {
+                lv.color = color.value;
+                persistLevels();
+            });
+            const label = document.createElement("span");
+            label.textContent = Number(lv.price).toFixed(1);
+            const rm = document.createElement("button");
+            rm.type = "button";
+            rm.textContent = "×";
+            rm.title = "Remove level";
+            rm.addEventListener("click", () => {
+                userLevels = userLevels.filter((x) => x.id !== lv.id);
+                renderLevels();
+                persistLevels();
+            });
+            chip.append(color, label, rm);
+            list.appendChild(chip);
+        });
+    }
+    function addLevel() {
+        const input = document.getElementById("level-price");
+        const price = Number(input.value);
+        if (!Number.isFinite(price) || price <= 0) {
+            setMsg("Enter a Nifty price, for example 23052");
+            return;
+        }
+        const color = document.getElementById("level-color").value || "#0e7490";
+        const existing = userLevels.find((lv) => Math.abs(lv.price - price) < 0.05);
+        if (existing) {
+            existing.price = price;
+            existing.color = color;
+        } else {
+            userLevels.push({ id: String(Date.now()), price, color });
+        }
+        input.value = "";
+        setMsg("");
+        renderLevels();
+        persistLevels();
+    }
+    try {
+        const raw = JSON.parse(localStorage.getItem(LEVEL_KEY) || "[]");
+        if (Array.isArray(raw)) {
+            userLevels = raw.filter((lv) => lv && Number.isFinite(Number(lv.price)) && Number(lv.price) > 0).map((lv) => ({
+                id: String(lv.id || Date.now() + Math.random()),
+                price: Number(lv.price),
+                color: /^#[0-9a-fA-F]{6}$/.test(lv.color || "") ? lv.color : "#0e7490",
+            }));
+        }
+    } catch (e) { userLevels = []; }
+    renderLevels();
+    persistLevels();
+    document.getElementById("level-add").addEventListener("click", addLevel);
+    document.getElementById("level-price").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") addLevel();
+    });
+    document.getElementById("level-presets").addEventListener("click", (e) => {
+        const btn = e.target.closest(".level-preset");
+        if (!btn) return;
+        document.getElementById("level-color").value = btn.dataset.color;
+    });
+
+    const ARROW_KEY = "niftychart-arrows";
+    let userArrows = [];
+    let arrowDir = "up";
+    let arrowArmed = false;
+    function persistArrows() {
+        try { localStorage.setItem(ARROW_KEY, JSON.stringify(userArrows)); } catch (e) { /* ignore */ }
+        NC.setUserArrows(charts.premiumChart, userArrows);
+    }
+    function renderArrows() {
+        const list = document.getElementById("arrow-list");
+        if (!list) return;
+        list.replaceChildren();
+        userArrows.forEach((a) => {
+            const chip = document.createElement("span");
+            chip.className = "level-chip";
+            const color = document.createElement("input");
+            color.type = "color";
+            color.value = a.color;
+            color.title = "Change color";
+            color.addEventListener("input", () => {
+                a.color = color.value;
+                persistArrows();
+            });
+            const label = document.createElement("span");
+            label.textContent = (a.dir === "down" ? "↓ " : "↑ ") + NC.toHHMM(new Date(a.time));
+            const rm = document.createElement("button");
+            rm.type = "button";
+            rm.textContent = "×";
+            rm.title = "Remove arrow";
+            rm.addEventListener("click", () => {
+                userArrows = userArrows.filter((x) => x.id !== a.id);
+                renderArrows();
+                persistArrows();
+            });
+            chip.append(color, label, rm);
+            list.appendChild(chip);
+        });
+    }
+    function setArrowDir(dir) {
+        arrowDir = dir === "down" ? "down" : "up";
+        document.getElementById("arrow-up").classList.toggle("is-active", arrowDir === "up");
+        document.getElementById("arrow-down").classList.toggle("is-active", arrowDir === "down");
+        document.getElementById("arrow-color").value = arrowDir === "down" ? "#dc2626" : "#15803d";
+    }
+    function setArrowArmed(on) {
+        arrowArmed = !!on;
+        const btn = document.getElementById("arrow-arm");
+        btn.classList.toggle("is-armed", arrowArmed);
+        btn.textContent = arrowArmed ? "Now click a candle" : "Place on candle";
+        document.body.classList.toggle("arrow-armed", arrowArmed);
+        setMsg(arrowArmed ? "Click a candle on the chart to drop the arrow." : "");
+    }
+    function placeArrow(ms) {
+        const candles = charts.premiumChart.$niftyCandles || [];
+        let best = null;
+        let bestD = Infinity;
+        candles.forEach((c) => {
+            const d = Math.abs(c.x.getTime() - ms);
+            if (d < bestD) { best = c; bestD = d; }
+        });
+        if (!best || bestD > 15 * 60 * 1000) {
+            setMsg("Click directly on a candle.");
+            return;
+        }
+        const time = best.x.getTime();
+        const color = document.getElementById("arrow-color").value || (arrowDir === "down" ? "#dc2626" : "#15803d");
+        const existing = userArrows.find((a) => a.time === time && a.dir === arrowDir);
+        if (existing) existing.color = color;
+        else userArrows.push({ id: String(Date.now()), time, dir: arrowDir, color });
+        setArrowArmed(false);
+        setMsg("");
+        renderArrows();
+        persistArrows();
+    }
+    try {
+        const raw = JSON.parse(localStorage.getItem(ARROW_KEY) || "[]");
+        if (Array.isArray(raw)) {
+            userArrows = raw.filter((a) => a && Number.isFinite(Number(a.time))).map((a) => ({
+                id: String(a.id || Date.now() + Math.random()),
+                time: Number(a.time),
+                dir: a.dir === "down" ? "down" : "up",
+                color: /^#[0-9a-fA-F]{6}$/.test(a.color || "") ? a.color : (a.dir === "down" ? "#dc2626" : "#15803d"),
+            }));
+        }
+    } catch (e) { userArrows = []; }
+    document.getElementById("arrow-up").addEventListener("click", () => setArrowDir("up"));
+    document.getElementById("arrow-down").addEventListener("click", () => setArrowDir("down"));
+    document.getElementById("arrow-arm").addEventListener("click", () => setArrowArmed(!arrowArmed));
+    charts.premiumChart.canvas.addEventListener("click", (native) => {
+        if (!arrowArmed) return;
+        const chart = charts.premiumChart;
+        const scale = chart.scales.x;
+        const area = chart.chartArea;
+        if (!scale || !area) return;
+        const rect = chart.canvas.getBoundingClientRect();
+        const cssX = native.clientX - rect.left;
+        const x = rect.width ? (cssX / rect.width) * chart.width : cssX;
+        if (x < area.left || x > area.right) {
+            setMsg("Click inside the chart, on a candle.");
+            return;
+        }
+        const value = scale.getValueForPixel(x);
+        const ms = value instanceof Date ? value.getTime() : Number(value);
+        if (Number.isFinite(ms)) placeArrow(ms);
+    });
+    renderArrows();
+    persistArrows();
+
+    NC.bindPremiumLayerToggles(charts.premiumChart);
+    setInterval(refreshAlgoStatus, 15000);
+    setInterval(() => { if (!isHistorical && document.visibilityState !== "hidden") bootstrapApi(); }, 30000);
+})();
+</script>
+</body>
+</html>

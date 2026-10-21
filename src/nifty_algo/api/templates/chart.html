@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Strangle Chart - Nifty Algo</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <script src="/static/js/strangle-chart-core.js"></script>
+    <style>
+        html { color-scheme: dark; height: 100%; }
+        :root {
+          --bg:#0b1220; --card:#0f1a33; --text:#e7eefc; --muted:#95a3c7; --grid:#253055; --accent:#4ecca3;
+          --charts-vpad: 280px;
+        }
+      
+        body {
+          margin: 0;
+          padding: 14px 12px;
+          font-family: Arial, sans-serif;
+          background: var(--bg);
+          color: var(--text);
+          min-height: 100vh;
+          min-height: 100dvh;
+          overflow: hidden;
+        }
+      
+        .container {
+          width: 100%;
+          max-width: 100%;
+          margin: 0 auto;
+          height: calc(100vh - 28px);
+          height: calc(100dvh - 28px);
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+      
+        .header {
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
+          gap:10px;
+          margin-bottom: 8px;
+          flex-shrink: 0;
+        }
+      
+        h1 {
+          margin: 0;
+          font-size: 20px;
+          color: var(--accent);
+        }
+      
+        .status {
+          font-size: 12px;
+          font-weight: 600;
+          color: #9fd4ff;
+          padding: 6px 10px;
+          border-radius: 8px;
+          border: 1px solid #223260;
+          background: #0a142e;
+        }
+        .status.waiting { color: #ffcc80; }
+        .status.tracking { color: #32cd32; }
+
+        .chart-controls {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          flex-wrap: wrap;
+          margin: 4px 0 10px;
+          padding: 8px 10px;
+          border: 1px solid #1c2b54;
+          border-radius: 10px;
+          background: #0a142e;
+          flex-shrink: 0;
+        }
+
+        /* Keep mode away from Load chart */
+        .mode-toggle-end {
+          margin-left: auto;
+        }
+
+        /* Segmented control: active side is obvious (filled pill) */
+        .mode-segment {
+          display: inline-flex;
+          align-items: stretch;
+          padding: 3px;
+          border-radius: 999px;
+          background: #070f22;
+          border: 1px solid #223260;
+          gap: 3px;
+          flex-shrink: 0;
+        }
+
+        .mode-segment__btn {
+          border: none;
+          border-radius: 999px;
+          padding: 7px 16px;
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+          cursor: pointer;
+          background: transparent;
+          color: var(--muted);
+          transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .mode-segment__btn:hover:not(.is-active) {
+          color: var(--text);
+          background: rgba(255, 255, 255, 0.06);
+        }
+
+        .mode-segment__btn.is-active {
+          background: var(--accent);
+          color: #061018;
+          box-shadow: 0 1px 8px rgba(78, 204, 163, 0.35);
+        }
+
+        .mode-segment__btn:focus-visible {
+          outline: 2px solid #6eb8ff;
+          outline-offset: 2px;
+        }
+
+        .date-control {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          color: #d5e3ff;
+        }
+
+        .date-control input[type="date"] {
+          background: #091127;
+          color: #e7eefc;
+          border: 1px solid #2a3b6c;
+          border-radius: 6px;
+          padding: 4px 8px;
+          font-size: 12px;
+        }
+
+        .chart-controls-btn {
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          padding: 6px 14px;
+          border-radius: 8px;
+          border: 1px solid #2a5580;
+          background: linear-gradient(180deg, #1a3a6e 0%, #132d52 100%);
+          color: #e7eefc;
+        }
+
+        .chart-controls-btn:hover:not(:disabled) {
+          border-color: var(--accent);
+          color: #fff;
+        }
+
+        .chart-controls-btn:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
+
+        .chart-message {
+          min-height: 16px;
+          font-size: 12px;
+          color: #95a3c7;
+          margin-bottom: 6px;
+          flex-shrink: 0;
+        }
+
+        .chart-message.error {
+          color: #ffb3b3;
+        }
+
+        .chart-controls-hint {
+          margin: 0 0 10px;
+          font-size: 11px;
+          line-height: 1.35;
+          color: var(--muted);
+          flex-shrink: 0;
+        }
+      
+        .stats {
+          display:grid;
+          gap:8px;
+          grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+          margin-bottom: 10px;
+          flex-shrink: 0;
+        }
+      
+        .stat-card {
+          background: #0a142e;
+          border: 1px solid #172448;
+          border-radius: 10px;
+          padding: 7px 8px;
+        }
+      
+        .stat-value {
+          font-size: 15px;
+          font-weight: 700;
+          color: var(--accent);
+          line-height: 1.15;
+        }
+      
+        .stat-label {
+          font-size: 11px;
+          color: var(--muted);
+          margin-top: 3px;
+        }
+      
+        .charts {
+          display: grid;
+          grid-template-rows: minmax(260px, 1fr) minmax(180px, 0.65fr);
+          gap: 10px;
+          flex: 1 1 auto;
+          min-height: min(520px, calc(100vh - 120px));
+          min-width: 0;
+        }
+      
+        .card {
+          background: var(--card);
+          border: 1px solid #172448;
+          border-radius: 10px;
+          padding: 10px;
+          display:flex;
+          flex-direction:column;
+          min-height: 0;
+          position: relative;
+        }
+
+        .card.premium,
+        .card.volume { min-height: 0; }
+      
+        .card h2 {
+          position: absolute;
+          top: 8px;
+          left: 10px;
+          margin: 0;
+          font-size: 11px;
+          font-weight: 600;
+          line-height: 1.2;
+          color: #cfe0ff;
+          background: rgba(10, 20, 46, 0.78);
+          border: 1px solid #223260;
+          border-radius: 6px;
+          padding: 2px 8px;
+          z-index: 2;
+          pointer-events: none;
+        }
+      
+        .card canvas {
+          width: 100% !important;
+          height: 100% !important;
+          min-height: 0 !important;
+          flex: 1 1 auto;
+        }
+      
+        @media (max-width: 899px) {
+          .container { height: auto; min-height: calc(100vh - 28px); min-height: calc(100dvh - 28px); }
+          body { overflow: auto; }
+          .charts { grid-template-rows: minmax(240px, 55vh) minmax(200px, 40vh); min-height: 480px; }
+          .stats { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+        }
+      </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Strangle Premium Chart</h1>
+            <div id="status" class="status waiting">Waiting for strangle...</div>
+        </div>
+        <div class="chart-controls">
+            <label class="date-control" for="historical-date">
+                <span>Date</span>
+                <input type="date" id="historical-date" title="Session date (YYYY-MM-DD). Used when Historical is on." />
+            </label>
+            <button type="button" id="historical-load-btn" class="chart-controls-btn">Load chart</button>
+            <div class="mode-segment mode-toggle-end" role="tablist" aria-label="Chart data source">
+                <button type="button" role="tab" id="mode-live-seg" class="mode-segment__btn is-active" aria-selected="true" title="Live: WebSocket + in-memory / today DB">Live</button>
+                <button type="button" role="tab" id="mode-hist-seg" class="mode-segment__btn" aria-selected="false" title="Historical: load session from snapshot DB">Historical</button>
+            </div>
+        </div>
+        <p class="chart-controls-hint">Use <strong>Live</strong> / <strong>Historical</strong> above (highlighted = active). Pick a date, then <strong>Load chart</strong> for DB snapshots. Changing the date alone does not fetch.</p>
+        <div id="chart-message" class="chart-message"></div>
+        
+        <div class="stats">
+            <div class="stat-card ce">
+                <div class="stat-value" id="ce-strike">--</div>
+                <div class="stat-label">CE Strike</div>
+            </div>
+            <div class="stat-card ce">
+                <div class="stat-value" id="ce-price">--</div>
+                <div class="stat-label">CE Price</div>
+            </div>
+            <div class="stat-card pe">
+                <div class="stat-value" id="pe-strike">--</div>
+                <div class="stat-label">PE Strike</div>
+            </div>
+            <div class="stat-card pe">
+                <div class="stat-value" id="pe-price">--</div>
+                <div class="stat-label">PE Price</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="total-premium">--</div>
+                <div class="stat-label">Total Premium</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="spot-price">--</div>
+                <div class="stat-label">Spot Price</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="target">112</div>
+                <div class="stat-label">Target</div>
+            </div>
+        </div>
+        
+        <div class="charts">
+            <div class="card premium">
+              <h2>Total Premium + Nifty Close</h2>
+              <p style="margin:0 0 6px 0;font-size:11px;color:var(--muted);padding-left:2px;">Dashed lines = running max closes · fuchsia dots = both new high or new low vs prior closes (from 10:00 local)</p>
+              <canvas id="premiumChart"></canvas>
+            </div>
+            <div class="card volume">
+              <h2 id="chart2_volume_title">Volume Diff (CE − PE) in Lakhs</h2>
+              <canvas id="volumeChart"></canvas>
+            </div>
+          </div>
+    </div>
+    
+    <script>
+        const charts = window.StrangleChartCore.createStrangleCharts({
+            premiumCanvasId: "premiumChart",
+            volumeCanvasId: "volumeChart",
+            volumeUnitLabel: "Lakhs",
+            xAxisTime: true,
+            volumeXAxisTime: false,
+            includeTarget: true,
+        });
+        const chart = charts.premiumChart;
+
+        /** Same overlays as /backtest-ui: running max (premium / Nifty) + joint breakout scatter after 10:00. */
+        function ensureLiveAuxDatasets() {
+            if (chart.data.datasets.length >= 6) return;
+            chart.data.datasets.push(
+                {
+                    label: "Run max (premium close)",
+                    data: [],
+                    yAxisID: "y",
+                    borderColor: "rgba(255, 160, 160, 0.65)",
+                    borderWidth: 1.2,
+                    borderDash: [5, 4],
+                    fill: false,
+                    tension: 0,
+                    pointRadius: 0,
+                    order: 1,
+                },
+                {
+                    label: "Run max (Nifty close)",
+                    data: [],
+                    yAxisID: "y1",
+                    borderColor: "rgba(120, 190, 255, 0.65)",
+                    borderWidth: 1.2,
+                    borderDash: [5, 4],
+                    fill: false,
+                    tension: 0,
+                    pointRadius: 0,
+                    order: 1,
+                },
+                {
+                    type: "scatter",
+                    label: "Both new high or new low (from 10:00)",
+                    data: [],
+                    yAxisID: "y",
+                    showLine: false,
+                    pointRadius: 6,
+                    pointHoverRadius: 9,
+                    pointBackgroundColor: "#d946ef",
+                    pointBorderColor: "#ffffff",
+                    pointBorderWidth: 2,
+                    order: 100,
+                }
+            );
+        }
+
+        function barTimeFrom10Am(dt) {
+            if (!(dt instanceof Date) || isNaN(dt.getTime())) return false;
+            const h = dt.getHours();
+            const mi = dt.getMinutes();
+            return h > 10 || (h === 10 && mi >= 0);
+        }
+
+        function computeLiveAuxiliarySeries(premiumArr, niftyArr) {
+            const runMaxP = [];
+            const runMaxN = [];
+            const scatterPts = [];
+            let cumMaxP = -Infinity;
+            let cumMaxN = -Infinity;
+            let maxPBefore = -Infinity;
+            let maxNBefore = -Infinity;
+            let minPBefore = Infinity;
+            let minNBefore = Infinity;
+            const n = Math.min(premiumArr.length, niftyArr.length);
+            for (let i = 0; i < n; i++) {
+                const pr = premiumArr[i].y;
+                const nx = niftyArr[i].y;
+                const x = premiumArr[i].x;
+                if (pr != null && isFinite(pr)) {
+                    cumMaxP = cumMaxP === -Infinity ? pr : Math.max(cumMaxP, pr);
+                }
+                if (nx != null && isFinite(nx)) {
+                    cumMaxN = cumMaxN === -Infinity ? nx : Math.max(cumMaxN, nx);
+                }
+                runMaxP.push({ x, y: cumMaxP === -Infinity ? null : cumMaxP });
+                runMaxN.push({ x, y: cumMaxN === -Infinity ? null : cumMaxN });
+                if (
+                    barTimeFrom10Am(x) &&
+                    i > 0 &&
+                    pr != null &&
+                    isFinite(pr) &&
+                    nx != null &&
+                    isFinite(nx) &&
+                    maxPBefore > -Infinity &&
+                    maxNBefore > -Infinity &&
+                    minPBefore < Infinity &&
+                    minNBefore < Infinity
+                ) {
+                    const jointHigh = pr > maxPBefore && nx > maxNBefore;
+                    const jointLow = pr < minPBefore && nx < minNBefore;
+                    const premiumHighNiftyLow = pr > maxPBefore && nx < minNBefore;
+                    if (jointHigh || jointLow || premiumHighNiftyLow) {
+                        scatterPts.push({ x, y: pr });
+                    }
+                }
+                if (pr != null && isFinite(pr)) {
+                    maxPBefore = maxPBefore === -Infinity ? pr : Math.max(maxPBefore, pr);
+                    minPBefore = minPBefore === Infinity ? pr : Math.min(minPBefore, pr);
+                }
+                if (nx != null && isFinite(nx)) {
+                    maxNBefore = maxNBefore === -Infinity ? nx : Math.max(maxNBefore, nx);
+                    minNBefore = minNBefore === Infinity ? nx : Math.min(minNBefore, nx);
+                }
+            }
+            return { runMaxP, runMaxN, scatterPts };
+        }
+        /** Same Crores/Lakhs rule as backtest_ui (from API volume_chart). */
+        let volumeDisplay = { unit: "Lakhs", divisor: 1e5 };
+
+        function setVolumeDisplay(vc) {
+            if (!vc || vc.divisor == null || !vc.unit) return;
+            const d = Number(vc.divisor);
+            if (!Number.isFinite(d) || d <= 0) return;
+            volumeDisplay = { unit: String(vc.unit), divisor: d };
+        }
+
+        // Store chart data (premium + volume: category axis HH:MM, same as backtest)
+        let chartData = {
+            premium: [],
+            nifty: [],
+            target: 112,
+            volumeLabels: [],
+            volumeValues: [],
+        };
+        let isHistoricalMode = false;
+        let selectedHistoricalDate = "";
+
+        function syncModeSegmentUI() {
+            const liveSeg = document.getElementById("mode-live-seg");
+            const histSeg = document.getElementById("mode-hist-seg");
+            if (!liveSeg || !histSeg) return;
+            liveSeg.classList.toggle("is-active", !isHistoricalMode);
+            liveSeg.setAttribute("aria-selected", String(!isHistoricalMode));
+            histSeg.classList.toggle("is-active", isHistoricalMode);
+            histSeg.setAttribute("aria-selected", String(isHistoricalMode));
+        }
+
+        async function applyChartMode(historical) {
+            const wasHist = isHistoricalMode;
+            isHistoricalMode = historical;
+            syncModeSegmentUI();
+            if (historical) {
+                if (!wasHist) {
+                    clearChartMessage();
+                    clearChartData();
+                    const statusEl = document.getElementById("status");
+                    statusEl.className = "status waiting";
+                    statusEl.textContent = "Historical mode";
+                    updateStats(null);
+                    setChartMessage("Choose session date, then click Load chart.");
+                }
+            } else {
+                clearChartMessage();
+                await loadLiveDataFromApi();
+            }
+        }
+
+        function toNum(v, fallback = null) {
+            const n = Number(v);
+            return Number.isFinite(n) ? n : fallback;
+        }
+        
+        function _setIfPresent(id, text) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        }
+
+        function clearChartMessage() {
+            const el = document.getElementById("chart-message");
+            if (!el) return;
+            el.className = "chart-message";
+            el.textContent = "";
+        }
+
+        function setChartMessage(text, isError = false) {
+            const el = document.getElementById("chart-message");
+            if (!el) return;
+            el.className = isError ? "chart-message error" : "chart-message";
+            el.textContent = text || "";
+        }
+
+        function clearChartData() {
+            chartData.premium = [];
+            chartData.nifty = [];
+            chartData.volumeLabels = [];
+            chartData.volumeValues = [];
+            updateChart();
+            updateVolumeChart();
+        }
+
+        function updateStats(strangle) {
+            const statusEl = document.getElementById('status');
+            if (!strangle) {
+                statusEl.className = 'status waiting';
+                statusEl.textContent = 'Waiting for strangle selection...';
+                _setIfPresent('ce-strike', '--');
+                _setIfPresent('pe-strike', '--');
+                _setIfPresent('ce-price', '--');
+                _setIfPresent('pe-price', '--');
+                _setIfPresent('total-premium', '--');
+                _setIfPresent('spot-price', '--');
+                return;
+            }
+
+            statusEl.className = 'status tracking';
+            statusEl.textContent = `Tracking CE: ${strangle.ce_strike} | PE: ${strangle.pe_strike}`;
+
+            _setIfPresent('ce-strike', strangle.ce_strike);
+            _setIfPresent('pe-strike', strangle.pe_strike);
+            _setIfPresent('ce-price', strangle.ce_price?.toFixed(2) || '--');
+            _setIfPresent('pe-price', strangle.pe_price?.toFixed(2) || '--');
+            _setIfPresent('total-premium', strangle.total_premium?.toFixed(2) || '--');
+            _setIfPresent('spot-price', strangle.spot_price?.toFixed(2) || '--');
+            _setIfPresent('target', String(strangle.max_premium_target || 112));
+            chartData.target = strangle.max_premium_target || 112;
+        }
+        
+        function volumeDiffSharesFromRow(h) {
+            const vd = toNum(h.volume_diff, null);
+            const cev = toNum(h.ce_volume, 0);
+            const pev = toNum(h.pe_volume, 0);
+            return vd != null ? vd : (cev - pev);
+        }
+
+        function updateChartFromHistory(history) {
+            if (!history || history.length === 0) return;
+
+            chartData.premium = history.map(h => ({
+                x: new Date(h.timestamp),
+                y: toNum(h.total_premium, null),
+            }));
+            chartData.nifty = history.map(h => ({
+                x: new Date(h.timestamp),
+                y: toNum(h.spot_price, null),
+            }));
+            const S = window.StrangleChartCore;
+            chartData.volumeLabels = history.map(h => S.toHHMM(h.timestamp));
+            chartData.volumeValues = history.map(h => volumeDiffSharesFromRow(h) / volumeDisplay.divisor);
+
+            updateChart();
+            updateVolumeChart();
+        }
+
+        async function loadLiveDataFromApi() {
+            try {
+                const r = await fetch('/strangle/history');
+                if (!r.ok) {
+                    clearChartData();
+                    setChartMessage("Unable to load live chart data.", true);
+                    return;
+                }
+                const j = await r.json();
+                if (j.status !== "ok") {
+                    clearChartData();
+                    updateStats(null);
+                    setChartMessage("Live chart API returned an error.", true);
+                    return;
+                }
+                setVolumeDisplay(j.volume_chart);
+                updateStats(j.current || null);
+                if (j.history && j.history.length > 0) {
+                    updateChartFromHistory(j.history);
+                    clearChartMessage();
+                    return;
+                }
+                if (j.current && j.current.total_premium != null) {
+                    clearChartData();
+                    addChartPoint({
+                        timestamp: new Date().toISOString(),
+                        total_premium: j.current.total_premium,
+                        ce_price: j.current.ce_price,
+                        pe_price: j.current.pe_price,
+                        spot_price: j.current.spot_price,
+                        ce_volume: j.current.ce_volume,
+                        pe_volume: j.current.pe_volume,
+                        volume_diff: j.current.volume_diff,
+                    });
+                    setChartMessage("Live: showing latest point only (no history yet).");
+                    return;
+                }
+                clearChartData();
+                setChartMessage(
+                    "No live strangle data yet (empty tracker and no rows in today’s DB snapshot). " +
+                    "Confirm USE_DATABASE / DATABASE_NAME and that the algo is writing options + spot.",
+                    true
+                );
+            } catch (e) {
+                clearChartData();
+                setChartMessage("Failed to load live chart data.", true);
+            }
+        }
+
+        async function loadHistoricalDataForDate(tradeDate) {
+            if (!tradeDate) {
+                clearChartData();
+                setChartMessage("Please choose a historical date.", true);
+                return;
+            }
+            const statusEl = document.getElementById("status");
+            statusEl.className = "status waiting";
+            statusEl.textContent = `Loading historical data for ${tradeDate}...`;
+            try {
+                const r = await fetch(`/strangle/history/by-date?trade_date=${encodeURIComponent(tradeDate)}`);
+                if (!r.ok) {
+                    clearChartData();
+                    updateStats(null);
+                    setChartMessage(`Could not load historical data for ${tradeDate}.`, true);
+                    return;
+                }
+                const j = await r.json();
+                if (j.status !== "ok" || !j.history || j.history.length === 0) {
+                    clearChartData();
+                    updateStats(null);
+                    statusEl.className = "status waiting";
+                    statusEl.textContent = `Historical mode (${tradeDate})`;
+                    setChartMessage(j.message || `No historical data available for ${tradeDate}.`, true);
+                    return;
+                }
+                setVolumeDisplay(j.volume_chart);
+                updateStats(j.current);
+                updateChartFromHistory(j.history);
+                statusEl.className = "status tracking";
+                statusEl.textContent = `Historical mode (${tradeDate})`;
+                setChartMessage(`Showing historical data for ${tradeDate}.`);
+                isHistoricalMode = true;
+                syncModeSegmentUI();
+            } catch (e) {
+                clearChartData();
+                updateStats(null);
+                setChartMessage(`Failed to fetch historical data for ${tradeDate}.`, true);
+            }
+        }
+        
+        function addChartPoint(snapshot) {
+            if (!snapshot) return;
+
+            const ts = new Date(snapshot.timestamp);
+            const vd = toNum(snapshot.volume_diff, null);
+            const cev = toNum(snapshot.ce_volume, 0);
+            const pev = toNum(snapshot.pe_volume, 0);
+            const volDiffShares = vd != null ? vd : (cev - pev);
+
+            chartData.premium.push({ x: ts, y: toNum(snapshot.total_premium, null) });
+            chartData.nifty.push({ x: ts, y: toNum(snapshot.spot_price, null) });
+            chartData.volumeLabels.push(window.StrangleChartCore.toHHMM(ts));
+            chartData.volumeValues.push(volDiffShares / volumeDisplay.divisor);
+
+            // Keep last 1000 points
+            // if (chartData.premium.length > 1000) {
+            //     chartData.premium.shift();
+            //     chartData.ce.shift();
+            //     chartData.pe.shift();
+            //     chartData.volumeDiff.shift();
+            // }
+
+            updateChart();
+            updateVolumeChart();
+        }
+        
+        function updateChart() {
+            try {
+                ensureLiveAuxDatasets();
+                const targetData = chartData.premium.length > 0 ? [
+                    { x: chartData.premium[0].x, y: chartData.target },
+                    { x: chartData.premium[chartData.premium.length - 1].x, y: chartData.target }
+                ] : [];
+
+                chart.data.datasets[0].data = chartData.premium;
+                chart.data.datasets[1].data = chartData.nifty;
+                chart.data.datasets[2].data = targetData;
+                chart.data.datasets[2].label = 'Target (' + chartData.target + ')';
+
+                const aux = computeLiveAuxiliarySeries(chartData.premium, chartData.nifty);
+                chart.data.datasets[3].data = aux.runMaxP;
+                chart.data.datasets[4].data = aux.runMaxN;
+                chart.data.datasets[5].data = aux.scatterPts;
+                chart.update('none');
+                requestAnimationFrame(function () {
+                    try {
+                        chart.resize();
+                        charts.volumeChart.resize();
+                    } catch (e2) { /* ignore */ }
+                });
+            } catch (e) {
+                console.error('updateChart failed', e);
+            }
+        }
+
+        const volumeChart = charts.volumeChart;
+
+        function updateVolumeChart() {
+            window.StrangleChartCore.applyVolumeDiffSeries(volumeChart, {
+                labels: chartData.volumeLabels,
+                values: chartData.volumeValues,
+                unit: volumeDisplay.unit,
+                titleElement: document.getElementById("chart2_volume_title"),
+            });
+        }
+
+        // WebSocket connection
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/live`);
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                reconnectAttempts = 0;
+                if (!isHistoricalMode) {
+                    document.getElementById('status').textContent = 'Connected - waiting for data...';
+                }
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log('WS message:', data.type);
+                if (isHistoricalMode) return;
+                
+                if (data.type === 'initial' || data.type === 'refresh') {
+                    setVolumeDisplay(data.volume_chart);
+                    updateStats(data.strangle);
+                    if (data.strangle_history && data.strangle_history.length > 0) {
+                        updateChartFromHistory(data.strangle_history);
+                    } else if (data.strangle && data.strangle.total_premium != null) {
+                        // No history yet but we have current premium - show one point
+                        addChartPoint({
+                            timestamp: new Date().toISOString(),
+                            total_premium: data.strangle.total_premium,
+                            ce_price: data.strangle.ce_price,
+                            pe_price: data.strangle.pe_price,
+                            spot_price: data.strangle.spot_price ?? data.spot_price,
+                            ce_volume: data.strangle.ce_volume,
+                            pe_volume: data.strangle.pe_volume,
+                            volume_diff: data.strangle.volume_diff
+                        });
+                    }
+                } else if (data.type === 'update') {
+                    // Incremental update — only refresh header stats when strangle is present
+                    // (server can send strangle: null on some ticks; avoid flashing "Waiting")
+                    if (data.strangle) {
+                        updateStats(data.strangle);
+                    }
+                    if (data.strangle_snapshot) {
+                        addChartPoint(data.strangle_snapshot);
+                    }
+                }
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                document.getElementById('status').className = 'status waiting';
+                document.getElementById('status').textContent = 'Disconnected - reconnecting...';
+                
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    setTimeout(connect, 2000 * reconnectAttempts);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+        
+        // REST bootstrap: populate charts if WS initial payload is empty or delayed
+        async function bootstrapFromApi() {
+            if (isHistoricalMode) return;
+            try {
+                const r = await fetch('/strangle/history');
+                if (!r.ok) return;
+                const j = await r.json();
+                if (j.status !== 'ok' || !j.history || j.history.length === 0) return;
+                setVolumeDisplay(j.volume_chart);
+                updateStats(j.current);
+                updateChartFromHistory(j.history);
+            } catch (e) {
+                console.warn('strangle/history bootstrap failed', e);
+            }
+        }
+
+        bootstrapFromApi();
+        // Start WebSocket connection
+        connect();
+
+        // REST poll: keeps chart in sync if WS misses updates (other process, startup race,
+        // or browser WS quirks). Matches server cache / tracker throttle.
+        // Align with server UI_UPDATE_INTERVAL (REST poll is fallback; no duplicate history appends now).
+        let pollMs = 30000;
+        let lastHistoryKey = "";
+        async function pollStrangleHistory() {
+            if (isHistoricalMode) return;
+            if (document.visibilityState === "hidden") return;
+            try {
+                const r = await fetch("/strangle/history");
+                if (!r.ok) return;
+                const j = await r.json();
+                if (j.status !== "ok" || !j.history || j.history.length === 0) return;
+                const last = j.history[j.history.length - 1];
+                const key = last.timestamp + "|" + String((last.total_premium ?? "")) + "|" + j.history.length;
+                if (key === lastHistoryKey) return;
+                lastHistoryKey = key;
+                setVolumeDisplay(j.volume_chart);
+                updateStats(j.current);
+                updateChartFromHistory(j.history);
+            } catch (e) {
+                console.warn("strangle/history poll failed", e);
+            }
+        }
+        setInterval(pollStrangleHistory, pollMs);
+
+        (function initModeControls() {
+            const dateInput = document.getElementById("historical-date");
+            const loadBtn = document.getElementById("historical-load-btn");
+            const modeLiveSeg = document.getElementById("mode-live-seg");
+            const modeHistSeg = document.getElementById("mode-hist-seg");
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, "0");
+            const dd = String(today.getDate()).padStart(2, "0");
+            const todayStr = `${yyyy}-${mm}-${dd}`;
+
+            dateInput.value = todayStr;
+            dateInput.max = todayStr;
+            selectedHistoricalDate = todayStr;
+
+            syncModeSegmentUI();
+
+            modeLiveSeg.addEventListener("click", function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (isHistoricalMode) applyChartMode(false);
+            });
+            modeHistSeg.addEventListener("click", function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!isHistoricalMode) applyChartMode(true);
+            });
+
+            dateInput.addEventListener("change", function () {
+                selectedHistoricalDate = dateInput.value;
+            });
+
+            dateInput.addEventListener("keydown", function (ev) {
+                if (ev.key === "Enter") {
+                    ev.preventDefault();
+                    loadBtn.click();
+                }
+            });
+
+            loadBtn.addEventListener("click", async function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const tradeDate = dateInput.value || selectedHistoricalDate;
+                if (!tradeDate) {
+                    setChartMessage("Pick a session date first.", true);
+                    return;
+                }
+                if (!isHistoricalMode) {
+                    isHistoricalMode = true;
+                    syncModeSegmentUI();
+                }
+                selectedHistoricalDate = tradeDate;
+                await loadHistoricalDataForDate(selectedHistoricalDate);
+            });
+        })();
+    </script>
+</body>
+</html>

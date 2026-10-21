@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import date, timedelta
 
 try:
     from fyers_apiv3 import fyersModel
@@ -16,6 +17,7 @@ except Exception:
     data_ws = None
 
 from nifty_algo.brokers.base import BrokerInterface
+from nifty_algo.brokers.fyers_symbol_format import build_fyers_option_symbol
 from nifty_algo.config import config
 
 logger = logging.getLogger(__name__)
@@ -79,11 +81,83 @@ class FyersBroker(BrokerInterface):
         try:
             data = {"symbols": symbol}
             response = self.model.quotes(data=data)
-            if response.get("s") == "ok" and response.get("d"):
-                return response["d"][0].get("v", {})
-            return None
+            if response.get("s") != "ok" or not response.get("d"):
+                return None
+            return self._fyers_quote_v_from_response_row(response["d"][0])
         except Exception:
             return None
+
+    @staticmethod
+    def _fyers_quote_v_from_response_row(row: dict) -> dict:
+        """Map one ``d[]`` element to the quote value dict (``v``), with per-row status logging."""
+        if not isinstance(row, dict):
+            return {}
+        status = row.get("s")
+        if status and str(status).lower() not in ("ok", "200", "1"):
+            logger.debug(
+                "Fyers quote row not ok: n=%s s=%s msg=%s",
+                row.get("n"),
+                status,
+                row.get("message") or row.get("emsg") or row.get("message"),
+            )
+        v = row.get("v")
+        if isinstance(v, dict):
+            return v
+        return {}
+
+    def get_option_quotes_batch(self, symbols: list[str], chunk_size: int = 50) -> list[dict | None]:
+        """
+        Get quotes for multiple symbols. Fyers allows up to 50 symbols per request.
+        Returns list of quote dicts (or None for failed/missing) in same order as symbols.
+        """
+        if not symbols:
+            return []
+        results: list[dict | None] = []
+        for i in range(0, len(symbols), chunk_size):
+            chunk = symbols[i : i + chunk_size]
+            try:
+                data = {"symbols": ",".join(chunk)}
+                response = self.model.quotes(data=data)
+                if response.get("s") == "ok" and response.get("d"):
+                    d_list = response["d"]
+                    for j, sym in enumerate(chunk):
+                        if j < len(d_list):
+                            results.append(d_list[j].get("v", {}))
+                        else:
+                            results.append(None)
+                    # Help debug bad symbols: all quotes empty / no lp
+                    if chunk and d_list:
+                        def _has_lp(v: dict | None) -> bool:
+                            if not v:
+                                return False
+                            return (
+                                v.get("lp") is not None
+                                or v.get("ltp") is not None
+                                or v.get("last_price") is not None
+                            )
+
+                        if not any(
+                            _has_lp(d_list[j].get("v") if j < len(d_list) else None)
+                            for j in range(min(len(chunk), len(d_list)))
+                        ):
+                            r0 = d_list[0] if d_list else {}
+                            logger.warning(
+                                "Fyers quotes: no lp/ltp in chunk (first_symbol=%s quote_v=%s)",
+                                chunk[0],
+                                r0.get("v") if isinstance(r0, dict) else r0,
+                            )
+                else:
+                    logger.warning(
+                        "Fyers quotes batch failed: s=%s msg=%s first_symbol=%s",
+                        response.get("s"),
+                        response.get("message") or response.get("msg"),
+                        chunk[0] if chunk else None,
+                    )
+                    results.extend([None] * len(chunk))
+            except Exception as exc:
+                logger.debug("Fyers batch quote error: %s", exc)
+                results.extend([None] * len(chunk))
+        return results
 
     def get_positions(self) -> dict | None:
         """Get positions"""
@@ -94,32 +168,47 @@ class FyersBroker(BrokerInterface):
             return None
 
     def place_order(self, symbol: str, side: str, qty: int, order_type: str = "MARKET", price: float = 0.0):
-        """Place order"""
+        """Place order. Fyers API: type 1=Limit, 2=Market (see fyersModel.place_order docstring)."""
         try:
             order_data = {
                 "symbol": symbol,
                 "qty": qty,
-                "type": 2 if order_type == "LIMIT" else 1,
+                "type": 1 if order_type == "LIMIT" else 2,
                 "side": 1 if side == "BUY" else -1,
                 "productType": "INTRADAY",
                 "limitPrice": price,
                 "stopPrice": 0,
                 "validity": "DAY",
                 "disclosedQty": 0,
-                "offlineOrder": "False",
+                "offlineOrder": False,
             }
-            return self.model.place_order(data=order_data)
+            resp = self.model.place_order(data=order_data)
+            logger.info("Fyers place_order %s %s qty=%s | response=%s", side, symbol, qty, resp)
+            if isinstance(resp, dict) and resp.get("code") != 200:
+                logger.error("Fyers order rejected: %s", resp)
+            return resp
         except Exception as exc:
             logger.error("Error placing order: %s", exc)
             return None
 
+    def get_nearest_expiry(self) -> date | None:
+        """
+        Return the nearest Nifty weekly option expiry using ``NIFTY_WEEKLY_EXPIRY_WEEKDAY``
+        from config (default Tuesday). For a specific calendar date, set ``NIFTY_EXPIRY_DATE`` in ``.env``;
+        ``market.expiry.get_nearest_expiry`` applies that before calling the broker.
+        """
+        w = config.NIFTY_WEEKLY_EXPIRY_WEEKDAY
+        if not (0 <= w <= 6):
+            w = 1
+        today = date.today()
+        days_ahead = w - today.weekday()
+        if days_ahead < 0:
+            days_ahead += 7
+        return today + timedelta(days=days_ahead)
+
     def get_option_symbol(self, expiry_date, strike_price, option_type: str = "CE") -> str:
-        """Generate Fyers option symbol (YYMDD format)"""
-        year = expiry_date.strftime("%y")
-        month = str(expiry_date.month)
-        day = expiry_date.strftime("%d")
-        expiry_formatted = f"{year}{month}{day}"
-        return f"NSE:NIFTY{expiry_formatted}{int(strike_price)}{option_type}"
+        """NSE:NIFTY ticker from expiry date (auto weekly vs monthly; see ``fyers_symbol_format``)."""
+        return build_fyers_option_symbol(expiry_date, int(strike_price), option_type)
 
     def connect_websocket(self, symbols: list[str], handler):
         """Connect to Fyers WebSocket for real-time data"""

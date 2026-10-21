@@ -5,12 +5,14 @@ import time
 from pathlib import Path
 
 import logging
+import re
 
 from nifty_algo.config import config
 
 logger = logging.getLogger(__name__)
 
 _last_snapshot_time: float | None = None
+_last_volume_raw_by_symbol_date: dict[tuple[str, str], float] = {}
 
 
 def setup_database(cfg=config):
@@ -44,7 +46,9 @@ def setup_database(cfg=config):
             vega REAL,
             iv REAL,
             timestamp TEXT,
-            date TEXT
+            date TEXT,
+            volume_raw REAL,
+            volume_delta REAL
         )
         """
     )
@@ -108,6 +112,8 @@ def _migrate_database_schema(cursor: sqlite3.Cursor):
         "iv": "REAL",
         "timestamp": "TEXT",
         "date": "TEXT",
+        "volume_raw": "REAL",
+        "volume_delta": "REAL",
     }
 
     for col, col_type in columns.items():
@@ -129,7 +135,21 @@ def _migrate_database_schema(cursor: sqlite3.Cursor):
 
     if "spot_price" not in existing_spot:
         cursor.execute("ALTER TABLE nifty_spot ADD COLUMN spot_price REAL")
-
+def _extract_strike_from_symbol(sym: str | None) -> float | None:
+    """
+    Best-effort extraction of strike from an option symbol.
+    Handles patterns like ...23750CE or ...PE24000 at the end.
+    Returns float or None if it can't parse.
+    """
+    if not sym:
+        return None
+    m = re.search(r"(\d+)(CE|PE)$", sym)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
 
 def save_options_data_to_db(conn, all_option_data, timestamp_str: str, date_str: str):
     if not conn:
@@ -137,36 +157,88 @@ def save_options_data_to_db(conn, all_option_data, timestamp_str: str, date_str:
 
     cursor = conn.cursor()
     for row in all_option_data:
-        cursor.execute(
-            """
-            INSERT INTO options_data (
-                symbol, strike, option_type,
-                open, high, low, close, ltp, volume, prev_close,
-                delta, gamma, theta, vega, iv,
-                timestamp, date
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                row.get("symbol") or row.get("Symbol"),
-                row.get("strike"),
-                row.get("option_type"),
-                row.get("Open"),
-                row.get("High"),
-                row.get("Low"),
-                row.get("Close"),
-                row.get("LTP"),
-                row.get("Volume"),
-                row.get("Prev_Close"),
-                row.get("Delta"),
-                row.get("Gamma"),
-                row.get("Theta"),
-                row.get("Vega"),
-                row.get("IV"),
-                timestamp_str,
-                date_str,
-            ),
+        # Normalize field names
+        symbol = row.get("symbol") or row.get("Symbol")
+        strike = row.get("strike")
+        option_type = row.get("option_type") or row.get("Option_Type")
+
+        # Derive strike from symbol if not provided
+        if strike is None:
+            strike = _extract_strike_from_symbol(symbol)
+
+        # LTP/OHLC
+        ltp = row.get("ltp") or row.get("LTP")
+        open = row.get("open") or row.get("Open")
+        high = row.get("high") or row.get("High")
+        low = row.get("low") or row.get("Low")
+        close = row.get("close") or row.get("Close")
+
+        # Volume: accept both "Volume" and "volume", then normalize to incremental delta
+        volume_in = row.get("volume") if row.get("volume") is not None else row.get("Volume")
+        try:
+            volume_raw = float(volume_in) if volume_in is not None else 0.0
+        except (TypeError, ValueError):
+            volume_raw = 0.0
+        key = (str(symbol or ""), date_str)
+        prev_raw = _last_volume_raw_by_symbol_date.get(key)
+        if prev_raw is None:
+            volume_delta = volume_raw
+        elif volume_raw >= prev_raw:
+            volume_delta = volume_raw - prev_raw
+        else:
+            # Feed reset / rollover / anomaly
+            volume_delta = volume_raw
+        _last_volume_raw_by_symbol_date[key] = volume_raw
+
+        # Prev close and greeks
+        prev_close = row.get("Prev_Close")
+        delta = row.get("Delta")
+        gamma = row.get("Gamma")
+        theta = row.get("Theta")
+        vega = row.get("Vega")
+        iv = row.get("IV")
+        logger.info(
+            "Saving options data to database: %s, %s, %s, %s, raw=%s, delta=%s",
+            symbol,
+            strike,
+            option_type,
+            ltp,
+            volume_raw,
+            volume_delta,
         )
+                
+        cursor.execute(
+    """
+    INSERT INTO options_data (
+        symbol, strike, option_type,
+        open, high, low, close, ltp, volume, prev_close,
+        delta, gamma, theta, vega, iv,
+        timestamp, date, volume_raw, volume_delta
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+    (
+        symbol,
+        strike,
+        option_type,
+        open,
+        high,
+        low,
+        close,
+        ltp,
+        volume_delta,
+        prev_close,
+        delta,
+        gamma,
+        theta,
+        vega,
+        iv,
+        timestamp_str,
+        date_str,
+        volume_raw,
+        volume_delta,
+    ),
+)
     conn.commit()
 
 

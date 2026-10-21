@@ -21,7 +21,7 @@ def main():
 
     strike_info = get_strike_prices(spot, fast_mode=True)
     atm = strike_info["atm"]
-    expiry = get_nearest_expiry()
+    expiry = get_nearest_expiry(broker=broker)
 
     data, symbols, _ = fetch_strikes_smart(
         broker,
