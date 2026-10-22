@@ -698,6 +698,18 @@ def _build_nifty_historical_history_from_db(
                 lot_size=int(getattr(config, "ORDER_QTY", 75)),
             )
         tracker.reset()
+        # Live MarketCache appends every published leg and never drops them.
+        # The chart then reads the first cached volume of the volume-range strike
+        # (see _find_leg). The DB row for a tick is only that tick's batch, usually
+        # the offset pair, so a one-tick replay stores 0 for the VR legs and the
+        # |VR vol| ≥ 2× square disappears after a restart. This second tracker
+        # walks the same growing cache; only those two volumes are copied across.
+        volume_tracker = NiftyChartTracker(
+            atm_offset_points=int(getattr(config, "STRANGLE_ATM_OFFSET_POINTS", 100)),
+            strike_interval=int(getattr(config, "STRIKE_INTERVAL", 50)),
+            lot_size=int(getattr(config, "ORDER_QTY", 75)),
+        )
+        live_chain: list[dict] = []
 
         shared_ts = sorted(
             chain_by_ts.keys(),
@@ -709,6 +721,7 @@ def _build_nifty_historical_history_from_db(
 
         for ts in shared_ts:
             chain = chain_by_ts[ts]
+            live_chain.extend(chain)
             tdt = _parse_snapshot_datetime(trade_date, ts)
             spot = spot_by_ts.get(ts)
             if spot is None:
@@ -726,7 +739,11 @@ def _build_nifty_historical_history_from_db(
                 or_frozen = True
 
             snap = tracker.update(chain, spot, record_history=True, now=tdt)
+            vol_snap = volume_tracker.update(live_chain, spot, record_history=False, now=tdt)
             if snap:
+                if vol_snap is not None:
+                    snap.vr_ce_volume = vol_snap.vr_ce_volume
+                    snap.vr_pe_volume = vol_snap.vr_pe_volume
                 row = tracker.snapshot_to_dict(snap)
                 row["timestamp"] = _chart_timestamp_iso(trade_date, ts)
                 row["or_high"] = or_high if or_high and or_high > 0 else None
